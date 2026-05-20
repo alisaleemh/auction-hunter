@@ -1,0 +1,312 @@
+const TIMELEFT_UPDATE_MS = 30000;
+const STALE_THRESHOLD_HOURS = 8;
+
+const stateNode = document.getElementById("app-state");
+const form = document.getElementById("search-form");
+const queryInput = document.getElementById("q");
+const sortSelect = document.getElementById("sort");
+const clearButton = document.getElementById("clear-search");
+const submitButton = document.getElementById("search-submit");
+const resultsList = document.getElementById("results-list");
+const resultsTitle = document.getElementById("results-title");
+const resultsSubtitle = document.getElementById("results-subtitle");
+const resultStatus = document.getElementById("result-status");
+const indexStatus = document.getElementById("index-status");
+
+const initialState = {
+  apiUrl: stateNode?.dataset.apiUrl || "/api/search",
+  query: stateNode?.dataset.query || window.__INITIAL_QUERY__ || "",
+  sort: stateNode?.dataset.sort || window.__INITIAL_SORT__ || "ending_soonest",
+  limit: Number(stateNode?.dataset.limit || window.__INITIAL_LIMIT__ || 50),
+  indexedAt: stateNode?.dataset.indexedAt || "",
+  lastRunStatus: stateNode?.dataset.lastRunStatus || "",
+  lastRunFinishedAt: stateNode?.dataset.lastRunFinishedAt || "",
+  lastRunSummary: stateNode?.dataset.lastRunSummary || "",
+  results: Array.isArray(window.__INITIAL_RESULTS__) ? window.__INITIAL_RESULTS__ : [],
+};
+
+function money(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "Price unavailable";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(num);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatEndTime(endTime) {
+  if (!endTime) return "Time unavailable";
+  const parsed = Date.parse(endTime);
+  if (Number.isNaN(parsed)) return "Time unavailable";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
+}
+
+function formatTimeLeft(endTime) {
+  if (!endTime) {
+    return { text: "Time unavailable", badge: null, ended: false };
+  }
+  const end = Date.parse(endTime);
+  if (Number.isNaN(end)) {
+    return { text: "Time unavailable", badge: null, ended: false };
+  }
+
+  const deltaMs = end - Date.now();
+  if (deltaMs <= 0) {
+    return { text: "Ended", badge: "Ended", ended: true };
+  }
+
+  const totalMinutes = Math.floor(deltaMs / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (days || hours) parts.push(`${hours}h`);
+  if (!days && !hours) parts.push(`${minutes}m`);
+  else if (minutes) parts.push(`${minutes}m`);
+
+  const endDate = new Date(end);
+  const now = new Date();
+  const sameDay =
+    endDate.getFullYear() === now.getFullYear() &&
+    endDate.getMonth() === now.getMonth() &&
+    endDate.getDate() === now.getDate();
+
+  let badge = null;
+  if (deltaMs < 60 * 60 * 1000) {
+    badge = "Ending soon";
+  } else if (sameDay) {
+    badge = "Today";
+  }
+
+  return { text: `Ends in ${parts.join(" ")}`, badge, ended: false };
+}
+
+function buildChip(text) {
+  return `<span class="chip">${escapeHtml(text)}</span>`;
+}
+
+function timeBadgeClass(label) {
+  if (label === "Ended") return "time-badge danger";
+  if (label === "Ending soon") return "time-badge warning";
+  if (label === "Today") return "time-badge success";
+  return "time-badge";
+}
+
+function productResultCard(result) {
+  const image = result.imageUrl ? `<img src="${escapeHtml(result.imageUrl)}" alt="" loading="lazy">` : '<div class="thumb-placeholder">No image</div>';
+  const chips = [];
+  if (result.lot_number) chips.push(buildChip(`Lot ${result.lot_number}`));
+  if (result.condition) chips.push(buildChip(result.condition));
+  if (result.auctionAddress) chips.push(buildChip(result.auctionAddress));
+  if (result.shipping_available !== null && result.shipping_available !== undefined) {
+    chips.push(buildChip(result.shipping_available ? "Shipping" : "Pickup"));
+  }
+  const time = formatTimeLeft(result.endTime || result.end_time);
+  return `
+    <article class="result-card" data-result-card data-end-time="${escapeHtml(result.endTime || result.end_time || "")}" data-source="${escapeHtml(result.source || "")}" data-price="${escapeHtml(result.currentPrice ?? result.current_bid ?? "")}">
+      <div class="thumb">${image}</div>
+      <div class="result-body">
+        <div class="result-top">
+          <div class="result-title-wrap">
+            <p class="result-source">${escapeHtml(result.source || "")}${result.sourceAuction ? ` · ${escapeHtml(result.sourceAuction)}` : ""}</p>
+            <h2 class="result-title"><a href="${escapeHtml(result.productUrl || result.url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(result.lot_title || "")}</a></h2>
+          </div>
+          <div class="result-price">${result.currentPrice !== null && result.currentPrice !== undefined ? escapeHtml(money(result.currentPrice)) : "Price unavailable"}</div>
+        </div>
+        <div class="result-meta">${chips.join("")}</div>
+        <div class="time-row">
+          <span class="time-left" data-time-left>${escapeHtml(time.text)}</span>
+          <span class="${timeBadgeClass(time.badge)}" data-time-badge>${escapeHtml(time.badge || "")}</span>
+        </div>
+        ${result.description || result.details ? `<p class="result-copy">${escapeHtml(result.description || result.details)}</p>` : ""}
+        <div class="result-links">
+          <a class="link-button" href="${escapeHtml(result.productUrl || result.url || "#")}" target="_blank" rel="noreferrer">Open lot</a>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function resultSkeleton() {
+  return `
+    <article class="result-card skeleton">
+      <div class="thumb skeleton-box"></div>
+      <div class="result-body">
+        <div class="skeleton-line short"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line medium"></div>
+        <div class="skeleton-line long"></div>
+      </div>
+    </article>
+  `;
+}
+
+function emptyState(title, detail) {
+  return `
+    <section class="empty-state" role="status">
+      <h2>${escapeHtml(title)}</h2>
+      <p>${escapeHtml(detail)}</p>
+    </section>
+  `;
+}
+
+function updateIndexStatus() {
+  if (!indexStatus) return;
+  const indexedAt = indexStatus.dataset.indexedAt || initialState.indexedAt;
+  if (!indexedAt) {
+    indexStatus.textContent = "Last indexed: Not indexed yet";
+    indexStatus.classList.remove("warning", "success");
+    return;
+  }
+
+  const indexed = Date.parse(indexedAt);
+  if (Number.isNaN(indexed)) {
+    indexStatus.textContent = `Last indexed: ${indexedAt}`;
+    return;
+  }
+
+  const ageHours = (Date.now() - indexed) / (1000 * 60 * 60);
+  indexStatus.textContent = `Last indexed: ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(indexed)}`;
+  indexStatus.classList.toggle("warning", ageHours > STALE_THRESHOLD_HOURS);
+  if (ageHours > STALE_THRESHOLD_HOURS) {
+    indexStatus.classList.add("warning");
+  }
+}
+
+function updateTimeLeft() {
+  document.querySelectorAll("[data-result-card]").forEach((card) => {
+    const endTime = card.dataset.endTime;
+    const timeLeftNode = card.querySelector("[data-time-left]");
+    const badgeNode = card.querySelector("[data-time-badge]");
+    if (!timeLeftNode || !badgeNode) return;
+    const time = formatTimeLeft(endTime);
+    timeLeftNode.textContent = time.text;
+    badgeNode.textContent = time.badge || "";
+    badgeNode.hidden = !time.badge;
+    badgeNode.className = timeBadgeClass(time.badge);
+    card.classList.toggle("ended", time.ended);
+  });
+  updateIndexStatus();
+}
+
+function renderResults(results, query) {
+  if (!results.length) {
+    resultsList.innerHTML = emptyState("No products found.", query ? "Try a broader search term." : "Use the search box to find matching lots.");
+    return;
+  }
+  resultsList.innerHTML = results.map((result) => productResultCard(result)).join("");
+  updateTimeLeft();
+}
+
+function setLoading(loading) {
+  submitButton.disabled = loading;
+  clearButton.disabled = loading;
+  queryInput.disabled = loading;
+  sortSelect.disabled = loading;
+  if (loading) {
+    resultsList.innerHTML = Array.from({ length: 4 }, () => resultSkeleton()).join("");
+    resultStatus.textContent = "Searching...";
+  } else {
+    resultStatus.textContent = "";
+  }
+}
+
+function updateSummary(query, count) {
+  if (!resultsTitle || !resultsSubtitle) return;
+  if (!query) {
+    resultsTitle.textContent = "Search products across indexed auctions.";
+    resultsSubtitle.textContent = "Search products across indexed auctions.";
+    return;
+  }
+  resultsTitle.textContent = "Results";
+  resultsSubtitle.textContent = `${count} ${count === 1 ? "match" : "matches"} for "${query}"`;
+}
+
+function syncUrl(query, sort) {
+  const url = new URL(window.location.href);
+  if (query) url.searchParams.set("q", query);
+  else url.searchParams.delete("q");
+  if (sort) url.searchParams.set("sort", sort);
+  else url.searchParams.delete("sort");
+  if (initialState.limit) url.searchParams.set("limit", String(initialState.limit));
+  window.history.replaceState({}, "", url);
+}
+
+async function runSearch(query, sort) {
+  if (!query) {
+    renderResults([], query);
+    updateSummary("", 0);
+    syncUrl("", sort);
+    return;
+  }
+
+  setLoading(true);
+  syncUrl(query, sort);
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      sort,
+      limit: String(initialState.limit || 50),
+    });
+    const response = await fetch(`${initialState.apiUrl}?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`Search failed (${response.status})`);
+    }
+    const payload = await response.json();
+    renderResults(payload.results || [], payload.query || query);
+    updateSummary(payload.query || query, payload.count || 0);
+    resultStatus.textContent = payload.last_run_summary || "";
+  } catch (error) {
+    resultsList.innerHTML = emptyState("Search unavailable.", error instanceof Error ? error.message : "Unable to load search results.");
+    resultStatus.textContent = "";
+  } finally {
+    setLoading(false);
+    updateTimeLeft();
+  }
+}
+
+function initialize() {
+  queryInput.value = initialState.query;
+  sortSelect.value = initialState.sort || "ending_soonest";
+  updateIndexStatus();
+  updateTimeLeft();
+
+  if (!initialState.query) {
+    renderResults([], "");
+    updateSummary("", 0);
+  }
+
+  form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void runSearch(queryInput.value.trim(), sortSelect.value);
+  });
+
+  sortSelect?.addEventListener("change", () => {
+    if (queryInput.value.trim()) {
+      void runSearch(queryInput.value.trim(), sortSelect.value);
+    } else {
+      syncUrl("", sortSelect.value);
+    }
+  });
+
+  clearButton?.addEventListener("click", () => {
+    queryInput.value = "";
+    queryInput.focus();
+    void runSearch("", sortSelect.value);
+  });
+
+  window.setInterval(updateTimeLeft, TIMELEFT_UPDATE_MS);
+}
+
+initialize();

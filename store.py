@@ -141,6 +141,39 @@ def format_time_left(end_time: str | None, now: datetime | None = None) -> str:
     return " ".join(parts)
 
 
+def _extract_image_url(raw_payload_json: str | None) -> str | None:
+    if not raw_payload_json:
+        return None
+    try:
+        payload = json.loads(raw_payload_json)
+    except json.JSONDecodeError:
+        return None
+
+    candidate_keys = ("image_url", "imageUrl", "thumbnail", "thumbnail_url", "thumbnailUrl", "photo", "photo_url", "photoUrl", "image", "img")
+
+    def walk(value: object) -> str | None:
+        if isinstance(value, dict):
+            for key in candidate_keys:
+                candidate = value.get(key)
+                if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+                    return candidate
+            for nested in value.values():
+                found = walk(nested)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for item in value:
+                found = walk(item)
+                if found:
+                    return found
+        elif isinstance(value, str) and value.startswith(("http://", "https://")):
+            if any(value.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif")):
+                return value
+        return None
+
+    return walk(payload)
+
+
 class AuctionStore:
     def __init__(self, db_path: Path | str = DEFAULT_DB_PATH):
         self.db_path = Path(db_path)
@@ -358,11 +391,12 @@ class AuctionStore:
                 (source_id, source_id),
             )
 
-    def query_results(self, query: str, now: datetime | None = None) -> list[dict]:
+    def query_results(self, query: str, now: datetime | None = None, sort_by: str = "relevance", limit: int = 50) -> list[dict]:
         current = now or utc_now()
         now_iso = to_iso(current)
         window_end = to_iso(current + timedelta(days=7))
         token_groups = expanded_query_tokens(query)
+        limit = max(1, min(int(limit or 50), 100))
         sql = """
             SELECT
                 s.name AS source,
@@ -378,7 +412,8 @@ class AuctionStore:
                 l.description AS description,
                 l.details AS details,
                 l.url AS url,
-                l.shipping_available AS shipping_available
+                l.shipping_available AS shipping_available,
+                l.raw_payload_json AS raw_payload_json
             FROM lots l
             JOIN auctions a ON a.id = l.auction_id
             JOIN sources s ON s.id = l.source_id
@@ -394,18 +429,25 @@ class AuctionStore:
             rows = conn.execute(sql, params).fetchall()
         results = []
         for row in rows:
+            image_url = _extract_image_url(row["raw_payload_json"])
             results.append(
                 {
                     "source": row["source"],
                     "auction_title": row["auction_title"],
+                    "sourceAuction": row["auction_title"],
                     "auction_address": row["auction_address"] or "",
+                    "auctionAddress": row["auction_address"] or "",
                     "distance_miles": row["distance_miles"],
                     "lot_title": row["lot_title"],
                     "lot_number": row["lot_number"] or "",
                     "current_bid": row["current_bid"],
+                    "currentPrice": row["current_bid"],
                     "end_time": row["end_time"],
+                    "endTime": row["end_time"],
                     "end_time_iso": row["end_time"],
                     "time_left": format_time_left(row["end_time"], current),
+                    "image_url": image_url,
+                    "imageUrl": image_url,
                     "shipping_available": None
                     if row["shipping_available"] is None
                     else bool(row["shipping_available"]),
@@ -413,9 +455,30 @@ class AuctionStore:
                     "description": row["description"] or "",
                     "details": row["details"] or "",
                     "url": row["url"],
+                    "productUrl": row["url"],
                 }
             )
-        return filter_and_sort_results(results, query)
+        filtered = filter_and_sort_results(results, query)
+        if sort_by == "relevance":
+            return filtered[:limit]
+
+        def sort_key(result: dict) -> tuple:
+            current_bid = result.get("current_bid")
+            has_price = isinstance(current_bid, (int, float))
+            price = float(current_bid) if has_price else 0.0
+            end_time_key = parse_iso(result.get("end_time"))
+            end_sort = end_time_key if end_time_key is not None else datetime.max.replace(tzinfo=timezone.utc)
+            title = result.get("lot_title") or ""
+            if sort_by == "ending_soonest":
+                return (end_sort, title.lower())
+            if sort_by == "price_low_high":
+                return (0 if has_price else 1, price, end_sort, title.lower())
+            if sort_by == "price_high_low":
+                return (0 if has_price else 1, -price, end_sort, title.lower())
+            return (end_sort, title.lower())
+
+        filtered.sort(key=sort_key)
+        return filtered[:limit]
 
     def get_metadata(self) -> SearchMetadata:
         with self.connect() as conn:

@@ -18,22 +18,33 @@ app = Flask(__name__)
 nightly_indexer: NightlyIndexer | None = None
 
 
-def run_search(query: str) -> tuple[list[dict], list[str]]:
-    return store.query_results(query), []
+def _parse_limit(value: str | None, default: int = 50) -> int:
+    try:
+        return int(value or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def run_search(query: str, sort_by: str = "relevance", limit: int = 50) -> tuple[list[dict], list[str]]:
+    return store.query_results(query, sort_by=sort_by, limit=limit), []
 
 
 @app.get("/")
 def index():
     query = request.args.get("q", "").strip()
-    results, errors = run_search(query) if query else ([], [])
+    sort_by = request.args.get("sort", "ending_soonest").strip() or "ending_soonest"
+    limit = _parse_limit(request.args.get("limit"), 50)
+    results, errors = run_search(query, sort_by=sort_by, limit=limit) if query else ([], [])
     metadata = store.get_metadata()
-    return render_template("index.html", query=query, results=results, errors=errors, metadata=metadata)
+    return render_template("index.html", query=query, sort=sort_by, limit=limit, results=results, errors=errors, metadata=metadata)
 
 
 @app.get("/api/search")
 def api_search():
     query = request.args.get("q", "").strip()
-    results, errors = run_search(query) if query else ([], [])
+    sort_by = request.args.get("sort", "relevance").strip() or "relevance"
+    limit = _parse_limit(request.args.get("limit"), 50)
+    results, errors = run_search(query, sort_by=sort_by, limit=limit) if query else ([], [])
     metadata = store.get_metadata()
     return jsonify(
         {
@@ -41,9 +52,12 @@ def api_search():
             "count": len(results),
             "results": results,
             "errors": errors,
+            "sort": sort_by,
+            "limit": limit,
             "indexed_at": metadata.indexed_at,
             "last_run_status": metadata.last_run_status,
             "last_run_finished_at": metadata.last_run_finished_at,
+            "last_run_summary": metadata.last_run_summary,
         }
     )
 
