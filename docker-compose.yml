@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    command: ["python", "app.py", "serve", "--port", "5001"]
+    ports:
+      - "5001:5001"
+    volumes:
+      - auction-data:/app/data
+
+  indexer:
+    build: .
+    restart: unless-stopped
+    command:
+      [
+        "sh",
+        "-c",
+        "while true; do echo \"[$$(date -Iseconds)] index start\"; python -u app.py index; echo \"[$$(date -Iseconds)] index sleep $${INDEX_INTERVAL:-21600}s\"; sleep \"$${INDEX_INTERVAL:-21600}\"; done",
+      ]
+    environment:
+      INDEX_INTERVAL: ${AUCTION_INDEX_INTERVAL:-21600}
+    volumes:
+      - auction-data:/app/data
+
+volumes:
+  auction-data:

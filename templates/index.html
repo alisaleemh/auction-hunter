@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Auction Item Search</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; color: #222; }
+      form { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+      input[type="text"] { min-width: 20rem; padding: 0.6rem; }
+      button { padding: 0.6rem 1rem; cursor: pointer; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #ddd; padding: 0.6rem; vertical-align: top; text-align: left; }
+      th { background: #f4f4f4; }
+      .muted { color: #666; }
+      @media (max-width: 900px) {
+        table, thead, tbody, th, td, tr { display: block; }
+        thead { display: none; }
+        tr { border: 1px solid #ddd; margin-bottom: 0.75rem; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Auction Item Search</h1>
+    <p class="muted">Search indexed open lots from HiBid and 403 Auction ending within the next 7 days.</p>
+    <p class="muted">
+      Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
+      {% if metadata.last_run_status %}
+        | Last run: {{ metadata.last_run_status }}{% if metadata.last_run_finished_at %} at {{ metadata.last_run_finished_at }}{% endif %}
+      {% endif %}
+      {% if metadata.last_run_summary %}
+        | {{ metadata.last_run_summary }}
+      {% endif %}
+    </p>
+    <form method="get" action="/">
+      <input type="text" name="q" value="{{ query }}" placeholder="Search lot title, condition, or details">
+      <button type="submit">Search</button>
+    </form>
+
+    {% if query %}
+      {% if errors %}
+        <p class="muted">Completed with provider issues: {{ errors|join("; ") }}</p>
+      {% endif %}
+      <p><strong>{{ results|length }}</strong> results for <strong>{{ query }}</strong></p>
+      <table>
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Auction</th>
+            <th>Address</th>
+            <th>Distance</th>
+            <th>Lot</th>
+            <th>Lot #</th>
+            <th>Bid</th>
+            <th>Time Left</th>
+            <th>Shipping</th>
+            <th>Link</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for result in results %}
+            <tr>
+              <td>{{ result.source }}</td>
+              <td>{{ result.auction_title }}</td>
+              <td>{{ result.auction_address }}</td>
+              <td>{% if result.distance_miles is not none %}{{ result.distance_miles }} mi{% endif %}</td>
+              <td>
+                <strong>{{ result.lot_title }}</strong>
+                {% if result.condition %}
+                  <div class="muted">Condition: {{ result.condition }}</div>
+                {% endif %}
+              </td>
+              <td>{{ result.lot_number }}</td>
+              <td>{% if result.current_bid is not none %}{{ result.current_bid }}{% endif %}</td>
+              <td>{{ result.time_left }}</td>
+              <td>
+                {% if result.shipping_available is sameas true %}Yes
+                {% elif result.shipping_available is sameas false %}No
+                {% endif %}
+              </td>
+              <td><a href="{{ result.url }}" target="_blank" rel="noreferrer">Open</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </body>
+  </html>
