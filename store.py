@@ -491,6 +491,7 @@ class AuctionStore:
                 LIMIT 1
                 """
             ).fetchone()
+            latest_lot_indexed = conn.execute("SELECT MAX(indexed_at) AS indexed_at FROM lots").fetchone()
             last_run = conn.execute(
                 """
                 SELECT finished_at, success_summary, error_text
@@ -500,7 +501,7 @@ class AuctionStore:
                 """
             ).fetchone()
         return SearchMetadata(
-            indexed_at=last_success["finished_at"] if last_success else None,
+            indexed_at=(last_success["finished_at"] if last_success else None) or (latest_lot_indexed["indexed_at"] if latest_lot_indexed else None),
             last_run_status=None if last_run is None else ("error" if last_run["error_text"] else "success"),
             last_run_finished_at=last_run["finished_at"] if last_run else None,
             last_run_summary=last_run["success_summary"] if last_run else None,
