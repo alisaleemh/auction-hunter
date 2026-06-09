@@ -48,7 +48,13 @@ def _seed_store(store: AuctionStore):
         ],
     )
     store.prune_source_rows("HiBid", run_id, (now + timedelta(days=7)).isoformat())
-    store.finish_index_run(run_id, (now + timedelta(minutes=5)).isoformat(), {"HiBid": {"status": "success"}}, "1/1 sources indexed", None)
+    store.finish_index_run(
+        run_id,
+        (now + timedelta(minutes=5)).isoformat(),
+        {"HiBid": {"status": "success", "auctions": 1, "lots": 1}},
+        "1/1 sources indexed",
+        None,
+    )
 
 
 def _seed_store_with_extra_lot(store: AuctionStore):
@@ -93,7 +99,13 @@ def _seed_store_with_extra_lot(store: AuctionStore):
         ],
     )
     store.prune_source_rows("HiBid", run_id, (now + timedelta(days=7)).isoformat())
-    store.finish_index_run(run_id, (now + timedelta(minutes=6)).isoformat(), {"HiBid": {"status": "success"}}, "1/1 sources indexed", None)
+    store.finish_index_run(
+        run_id,
+        (now + timedelta(minutes=6)).isoformat(),
+        {"HiBid": {"status": "success", "auctions": 1, "lots": 1}},
+        "1/1 sources indexed",
+        None,
+    )
 
 
 def test_get_root_empty_query(tmp_path, monkeypatch):
@@ -131,6 +143,8 @@ def test_api_search_returns_indexed_shape(tmp_path, monkeypatch):
     assert payload["results"][0]["currentPrice"] == 5
     assert payload["results"][0]["imageUrl"] == "https://example.com/image.jpg"
     assert payload["indexed_at"]
+    assert payload["indexed_lot_count"] == 1
+    assert payload["indexed_auction_count"] == 1
     assert "time_left" in payload["results"][0]
 
 

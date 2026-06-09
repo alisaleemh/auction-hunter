@@ -58,6 +58,9 @@ def api_search():
             "last_run_status": metadata.last_run_status,
             "last_run_finished_at": metadata.last_run_finished_at,
             "last_run_summary": metadata.last_run_summary,
+            "indexed_source_count": metadata.indexed_source_count,
+            "indexed_auction_count": metadata.indexed_auction_count,
+            "indexed_lot_count": metadata.indexed_lot_count,
         }
     )
 

@@ -93,6 +93,9 @@ class SearchMetadata:
     last_run_status: str | None
     last_run_finished_at: str | None
     last_run_summary: str | None
+    indexed_source_count: int | None
+    indexed_auction_count: int | None
+    indexed_lot_count: int | None
 
 
 def utc_now() -> datetime:
@@ -484,7 +487,7 @@ class AuctionStore:
         with self.connect() as conn:
             last_success = conn.execute(
                 """
-                SELECT finished_at, success_summary
+                SELECT finished_at, success_summary, source_stats_json
                 FROM index_runs
                 WHERE error_text IS NULL OR error_text = ''
                 ORDER BY id DESC
@@ -500,11 +503,26 @@ class AuctionStore:
                 LIMIT 1
                 """
             ).fetchone()
+        source_stats = {}
+        if last_success and last_success["source_stats_json"]:
+            try:
+                source_stats = json.loads(last_success["source_stats_json"])
+            except json.JSONDecodeError:
+                source_stats = {}
+        indexed_source_count = len(source_stats) if source_stats else None
+        indexed_auction_count = None
+        indexed_lot_count = None
+        if source_stats:
+            indexed_auction_count = sum(int(stats.get("auctions", 0) or 0) for stats in source_stats.values())
+            indexed_lot_count = sum(int(stats.get("lots", 0) or 0) for stats in source_stats.values())
         return SearchMetadata(
             indexed_at=(last_success["finished_at"] if last_success else None) or (latest_lot_indexed["indexed_at"] if latest_lot_indexed else None),
             last_run_status=None if last_run is None else ("error" if last_run["error_text"] else "success"),
             last_run_finished_at=last_run["finished_at"] if last_run else None,
             last_run_summary=last_run["success_summary"] if last_run else None,
+            indexed_source_count=indexed_source_count,
+            indexed_auction_count=indexed_auction_count,
+            indexed_lot_count=indexed_lot_count,
         )
 
     def last_success_for_scope(self, scope: str) -> datetime | None:

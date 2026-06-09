@@ -76,10 +76,19 @@ def test_prune_stale_rows(tmp_path):
 def test_metadata_reflects_last_run(tmp_path):
     store = AuctionStore(tmp_path / "index.sqlite3")
     run_id = store.start_index_run("manual", "2026-04-18T00:00:00+00:00")
-    store.finish_index_run(run_id, "2026-04-18T00:10:00+00:00", {"HiBid": {"status": "success"}}, "1/1 sources indexed", None)
+    store.finish_index_run(
+        run_id,
+        "2026-04-18T00:10:00+00:00",
+        {"HiBid": {"status": "success", "auctions": 2, "lots": 5}},
+        "1/1 sources indexed",
+        None,
+    )
     metadata = store.get_metadata()
     assert metadata.indexed_at == "2026-04-18T00:10:00+00:00"
     assert metadata.last_run_status == "success"
+    assert metadata.indexed_source_count == 1
+    assert metadata.indexed_auction_count == 2
+    assert metadata.indexed_lot_count == 5
 
 
 def test_format_time_left():

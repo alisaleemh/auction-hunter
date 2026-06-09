@@ -20,6 +20,11 @@
           <span class="pill" id="index-status" data-indexed-at="{{ metadata.indexed_at or '' }}">
             Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
           </span>
+          {% if metadata.indexed_lot_count is not none %}
+            <span class="pill subtle">
+              Indexed {{ metadata.indexed_lot_count }} lots{% if metadata.indexed_auction_count is not none %} across {{ metadata.indexed_auction_count }} auctions{% endif %}{% if metadata.indexed_source_count is not none %} from {{ metadata.indexed_source_count }} sources{% endif %}
+            </span>
+          {% endif %}
           {% if metadata.last_run_status %}
             <span class="pill subtle">{{ metadata.last_run_status|capitalize }}{% if metadata.last_run_finished_at %} · {{ metadata.last_run_finished_at }}{% endif %}</span>
           {% endif %}
