@@ -1,88 +1,111 @@
+{% from "_components.html" import empty_state, result_card, result_skeleton, search_bar %}
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Auction Item Search</title>
-    <style>
-      body { font-family: Arial, sans-serif; margin: 2rem; color: #222; }
-      form { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
-      input[type="text"] { min-width: 20rem; padding: 0.6rem; }
-      button { padding: 0.6rem 1rem; cursor: pointer; }
-      table { width: 100%; border-collapse: collapse; }
-      th, td { border: 1px solid #ddd; padding: 0.6rem; vertical-align: top; text-align: left; }
-      th { background: #f4f4f4; }
-      .muted { color: #666; }
-      @media (max-width: 900px) {
-        table, thead, tbody, th, td, tr { display: block; }
-        thead { display: none; }
-        tr { border: 1px solid #ddd; margin-bottom: 0.75rem; }
-      }
-    </style>
+    <title>Auction Hunter</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   </head>
   <body>
-    <h1>Auction Item Search</h1>
-    <p class="muted">Search indexed open lots from HiBid and 403 Auction ending within the next 7 days.</p>
-    <p class="muted">
-      Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
-      {% if metadata.last_run_status %}
-        | Last run: {{ metadata.last_run_status }}{% if metadata.last_run_finished_at %} at {{ metadata.last_run_finished_at }}{% endif %}
-      {% endif %}
-      {% if metadata.last_run_summary %}
-        | {{ metadata.last_run_summary }}
-      {% endif %}
-    </p>
-    <form method="get" action="/">
-      <input type="text" name="q" value="{{ query }}" placeholder="Search lot title, condition, or details">
-      <button type="submit">Search</button>
-    </form>
+    <main class="page-shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Auction Hunter</p>
+          <h1>Search indexed auctions</h1>
+          <p class="hero-copy">Search products across indexed auctions.</p>
+        </div>
+        <div class="status-stack">
+          <span class="pill">Updated every 6h</span>
+          <span class="pill" id="index-status" data-indexed-at="{{ metadata.indexed_at or '' }}">
+            Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
+          </span>
+          {% if metadata.indexed_lot_count is not none %}
+            <span class="pill subtle">
+              Indexed {{ metadata.indexed_lot_count }} lots{% if metadata.indexed_auction_count is not none %} across {{ metadata.indexed_auction_count }} auctions{% endif %}{% if metadata.indexed_source_count is not none %} from {{ metadata.indexed_source_count }} sources{% endif %}
+            </span>
+          {% endif %}
+          {% if metadata.last_run_status %}
+            <span class="pill subtle">{{ metadata.last_run_status|capitalize }}{% if metadata.last_run_finished_at %} · {{ metadata.last_run_finished_at }}{% endif %}</span>
+          {% endif %}
+        </div>
+      </section>
 
-    {% if query %}
-      {% if errors %}
-        <p class="muted">Completed with provider issues: {{ errors|join("; ") }}</p>
-      {% endif %}
-      <p><strong>{{ results|length }}</strong> results for <strong>{{ query }}</strong></p>
-      <table>
-        <thead>
-          <tr>
-            <th>Source</th>
-            <th>Auction</th>
-            <th>Address</th>
-            <th>Distance</th>
-            <th>Lot</th>
-            <th>Lot #</th>
-            <th>Bid</th>
-            <th>Time Left</th>
-            <th>Shipping</th>
-            <th>Link</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for result in results %}
-            <tr>
-              <td>{{ result.source }}</td>
-              <td>{{ result.auction_title }}</td>
-              <td>{{ result.auction_address }}</td>
-              <td>{% if result.distance_miles is not none %}{{ result.distance_miles }} mi{% endif %}</td>
-              <td>
-                <strong>{{ result.lot_title }}</strong>
-                {% if result.condition %}
-                  <div class="muted">Condition: {{ result.condition }}</div>
-                {% endif %}
-              </td>
-              <td>{{ result.lot_number }}</td>
-              <td>{% if result.current_bid is not none %}{{ result.current_bid }}{% endif %}</td>
-              <td>{{ result.time_left }}</td>
-              <td>
-                {% if result.shipping_available is sameas true %}Yes
-                {% elif result.shipping_available is sameas false %}No
-                {% endif %}
-              </td>
-              <td><a href="{{ result.url }}" target="_blank" rel="noreferrer">Open</a></td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% endif %}
+      <section class="search-shell">
+        {{ search_bar(query, sort) }}
+        <p class="search-hint">Submit on Enter. Clear the query to reset.</p>
+      </section>
+
+      <section class="results-shell">
+        <div class="results-header">
+          <div>
+            <h2 id="results-title">{{ "Results" if query else "All indexed lots" }}</h2>
+            <p id="results-subtitle" class="muted">
+              {% if query %}
+                {{ results|length }} of {{ total }} matches for "{{ query }}"
+              {% else %}
+                {{ total }} indexed lots available to browse
+              {% endif %}
+            </p>
+          </div>
+          <div id="result-status" class="status-note"></div>
+        </div>
+
+        {% if errors %}
+          <section class="error-banner" role="alert">
+            <strong>Search unavailable.</strong>
+            <span>{{ errors|join("; ") }}</span>
+          </section>
+        {% endif %}
+
+        <div id="results-list" class="results-list">
+          {% if results %}
+            {% for result in results %}
+              {{ result_card(result) }}
+            {% endfor %}
+          {% else %}
+            {% if query %}
+              {{ empty_state("No products found.", "Try a broader search term.") }}
+            {% else %}
+              {{ empty_state("No products found.", "The index is empty.") }}
+            {% endif %}
+          {% endif %}
+        </div>
+        {% if total > limit %}
+          <div class="pagination">
+            <a class="link-button{% if offset <= 0 %} disabled{% endif %}"
+               href="{{ url_for('index', q=query, sort=sort, limit=limit, offset=(offset - limit if offset > 0 else 0)) }}"
+               aria-disabled="{{ 'true' if offset <= 0 else 'false' }}">Previous</a>
+            <span class="pagination-note">
+              Showing {{ offset + 1 }}-{{ [offset + results|length, total]|min }} of {{ total }}
+            </span>
+            <a class="link-button{% if offset + limit >= total %} disabled{% endif %}"
+               href="{{ url_for('index', q=query, sort=sort, limit=limit, offset=offset + limit) }}"
+               aria-disabled="{{ 'true' if offset + limit >= total else 'false' }}">Next</a>
+          </div>
+        {% endif %}
+      </section>
+    </main>
+
+    <div
+      id="app-state"
+      data-api-url="{{ url_for('api_search') }}"
+      data-query="{{ query }}"
+      data-sort="{{ sort }}"
+      data-limit="{{ limit }}"
+      data-offset="{{ offset }}"
+      data-total="{{ total }}"
+      data-indexed-at="{{ metadata.indexed_at or '' }}"
+      data-last-run-status="{{ metadata.last_run_status or '' }}"
+      data-last-run-finished-at="{{ metadata.last_run_finished_at or '' }}"
+      data-last-run-summary="{{ metadata.last_run_summary or '' }}"
+    ></div>
+    <script>
+      window.__INITIAL_RESULTS__ = {{ results|tojson }};
+      window.__INITIAL_QUERY__ = {{ query|tojson }};
+      window.__INITIAL_SORT__ = {{ sort|tojson }};
+      window.__INITIAL_LIMIT__ = {{ limit|tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
-  </html>
+</html>

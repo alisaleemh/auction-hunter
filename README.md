@@ -32,6 +32,13 @@ python app.py serve --port 5001
 
 Open `http://127.0.0.1:5001`.
 
+## Search
+
+- Search from the main input or press Enter.
+- Use the sort dropdown for relevance, ending soonest, or price order.
+- Results stay within the indexed 7-day window.
+- The page keeps the search query in the URL.
+
 ## Build the Index
 
 ```bash
@@ -40,6 +47,12 @@ python app.py index
 ```
 
 The app reads only from the local SQLite index. Run `python app.py index` once before the first search. The `serve` command also starts a built-in nightly scheduler that refreshes the index automatically.
+
+The production container also runs the indexer loop every 6 hours.
+
+## Time Left
+
+Each result shows a live time-left label driven by the browser clock. The app stores timestamps in UTC ISO-8601 form and the browser computes the countdown from that timestamp, so the displayed text stays current while the page is open. Ended lots are shown as `Ended`; lots ending within the next hour get an `Ending soon` badge.
 
 ## Test
 
@@ -64,3 +77,5 @@ The web app listens on port `5001` and stores its SQLite database under `data/`.
 - HiBid search is fixed to `zip=L9T 8N6` and `miles=25` in v1.
 - Search requests do not fetch live upstream data.
 - Results are limited to lots ending within the next 7 days.
+- If a source does not expose an image, the card shows a neutral placeholder.
+- Timezone handling assumes timestamps are normalized to UTC before storage.

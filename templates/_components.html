@@ -1,0 +1,89 @@
+{% macro search_bar(query, sort) -%}
+<form id="search-form" class="search-bar" method="get" action="/">
+  <div class="search-input-wrap">
+    <label class="sr-only" for="q">Search products</label>
+    <input id="q" name="q" type="search" value="{{ query }}" placeholder="Search lot title, condition, details, or auction name" autocomplete="off" />
+    <button class="icon-button clear-button" type="button" id="clear-search" aria-label="Clear search">Clear</button>
+  </div>
+  <label class="sr-only" for="sort">Sort results</label>
+  <select id="sort" name="sort">
+    <option value="ending_soonest" {% if sort == "ending_soonest" %}selected{% endif %}>Ending soonest</option>
+    <option value="relevance" {% if sort == "relevance" %}selected{% endif %}>Relevance</option>
+    <option value="price_low_high" {% if sort == "price_low_high" %}selected{% endif %}>Price low to high</option>
+    <option value="price_high_low" {% if sort == "price_high_low" %}selected{% endif %}>Price high to low</option>
+  </select>
+  <button class="primary-button" id="search-submit" type="submit">Search</button>
+</form>
+{%- endmacro %}
+
+{% macro empty_state(title, detail) -%}
+<section class="empty-state" role="status">
+  <h2>{{ title }}</h2>
+  <p>{{ detail }}</p>
+</section>
+{%- endmacro %}
+
+{% macro result_skeleton() -%}
+<article class="result-card skeleton">
+  <div class="thumb skeleton-box"></div>
+  <div class="result-body">
+    <div class="skeleton-line short"></div>
+    <div class="skeleton-line"></div>
+    <div class="skeleton-line medium"></div>
+    <div class="skeleton-line long"></div>
+  </div>
+</article>
+{%- endmacro %}
+
+{% macro result_card(result) -%}
+<article class="result-card" data-result-card data-end-time="{{ result.endTime or '' }}" data-source="{{ result.source }}" data-price="{{ result.currentPrice if result.currentPrice is not none else '' }}">
+  <div class="thumb">
+    {% if result.imageUrl %}
+      <img src="{{ result.imageUrl }}" alt="" loading="lazy">
+    {% else %}
+      <div class="thumb-placeholder">No image</div>
+    {% endif %}
+  </div>
+  <div class="result-body">
+    <div class="result-top">
+      <div class="result-title-wrap">
+        <p class="result-source">{{ result.source }}{% if result.sourceAuction %} · {{ result.sourceAuction }}{% endif %}</p>
+        <h2 class="result-title">
+          <a href="{{ result.productUrl or result.url }}" target="_blank" rel="noreferrer">{{ result.lot_title }}</a>
+        </h2>
+      </div>
+      <div class="result-price">
+        {% if result.currentPrice is not none %}
+          <span>${{ '{:,.2f}'.format(result.currentPrice) }}</span>
+        {% else %}
+          <span>Price unavailable</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="result-meta">
+      {% if result.lot_number %}
+        <span class="chip">Lot {{ result.lot_number }}</span>
+      {% endif %}
+      {% if result.condition %}
+        <span class="chip">{{ result.condition }}</span>
+      {% endif %}
+      {% if result.auctionAddress %}
+        <span class="chip">{{ result.auctionAddress }}</span>
+      {% endif %}
+      {% if result.shipping_available is not none %}
+        <span class="chip">{{ "Shipping" if result.shipping_available else "Pickup" }}</span>
+      {% endif %}
+    </div>
+    <div class="time-row">
+      <span class="time-left" data-time-left>{{ result.time_left or "Time unavailable" }}</span>
+      <span class="time-badge" data-time-badge hidden></span>
+    </div>
+    {% if result.description or result.details %}
+      <p class="result-copy">{{ result.description or result.details }}</p>
+    {% endif %}
+    <div class="result-links">
+      <a class="link-button" href="{{ result.productUrl or result.url }}" target="_blank" rel="noreferrer">Open lot</a>
+    </div>
+  </div>
+</article>
+{%- endmacro %}
