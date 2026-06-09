@@ -38,8 +38,9 @@ def test_run_index_filters_to_seven_days(tmp_path):
 
     result = run_index(store, now=now, provider_loaders={"HiBid": loader})
     assert result["errors"] == []
-    rows = store.query_results("gate", now=now)
+    rows, total = store.query_results("gate", now=now)
     assert len(rows) == 1
+    assert total == 1
     assert rows[0]["lot_title"] == "Gate"
 
 
@@ -61,5 +62,6 @@ def test_failed_source_does_not_corrupt_prior_rows(tmp_path):
 
     result = run_index(store, now=now + timedelta(hours=1), provider_loaders={"HiBid": failure})
     assert result["errors"] == ["HiBid: boom"]
-    rows = store.query_results("gate", now=now)
+    rows, total = store.query_results("gate", now=now)
     assert len(rows) == 1
+    assert total == 1

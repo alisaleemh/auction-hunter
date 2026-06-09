@@ -114,7 +114,7 @@ def test_get_root_empty_query(tmp_path, monkeypatch):
     client = auction_app.app.test_client()
     response = client.get("/")
     assert response.status_code == 200
-    assert b"Auction Item Search" in response.data
+    assert b"All indexed lots" in response.data
 
 
 def test_get_root_renders_indexed_results(tmp_path, monkeypatch):
@@ -137,6 +137,7 @@ def test_api_search_returns_indexed_shape(tmp_path, monkeypatch):
     payload = response.get_json()
     assert response.status_code == 200
     assert payload["count"] == 1
+    assert payload["total"] == 1
     assert payload["results"][0]["lot_title"] == "Baby Gate"
     assert payload["results"][0]["sourceAuction"] == "Auction"
     assert payload["results"][0]["productUrl"] == "https://example.com/lot/12"
@@ -157,4 +158,17 @@ def test_api_search_supports_sort_and_limit(tmp_path, monkeypatch):
     payload = response.get_json()
     assert response.status_code == 200
     assert payload["count"] == 1
+    assert payload["results"][0]["lot_title"] == "Baby Gate"
+
+
+def test_api_search_browses_all_lots_when_query_empty(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    _seed_store(test_store)
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+    response = client.get("/api/search")
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["count"] == 1
+    assert payload["total"] == 1
     assert payload["results"][0]["lot_title"] == "Baby Gate"

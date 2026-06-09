@@ -18,6 +18,8 @@ const initialState = {
   query: stateNode?.dataset.query || window.__INITIAL_QUERY__ || "",
   sort: stateNode?.dataset.sort || window.__INITIAL_SORT__ || "ending_soonest",
   limit: Number(stateNode?.dataset.limit || window.__INITIAL_LIMIT__ || 50),
+  offset: Number(stateNode?.dataset.offset || 0),
+  total: Number(stateNode?.dataset.total || 0),
   indexedAt: stateNode?.dataset.indexedAt || "",
   lastRunStatus: stateNode?.dataset.lastRunStatus || "",
   lastRunFinishedAt: stateNode?.dataset.lastRunFinishedAt || "",
@@ -225,39 +227,35 @@ function setLoading(loading) {
 function updateSummary(query, count) {
   if (!resultsTitle || !resultsSubtitle) return;
   if (!query) {
-    resultsTitle.textContent = "Search products across indexed auctions.";
-    resultsSubtitle.textContent = "Search products across indexed auctions.";
+    resultsTitle.textContent = "All indexed lots";
+    resultsSubtitle.textContent = `${count} indexed lots available to browse`;
     return;
   }
   resultsTitle.textContent = "Results";
   resultsSubtitle.textContent = `${count} ${count === 1 ? "match" : "matches"} for "${query}"`;
 }
 
-function syncUrl(query, sort) {
+function syncUrl(query, sort, offset = 0) {
   const url = new URL(window.location.href);
   if (query) url.searchParams.set("q", query);
   else url.searchParams.delete("q");
   if (sort) url.searchParams.set("sort", sort);
   else url.searchParams.delete("sort");
   if (initialState.limit) url.searchParams.set("limit", String(initialState.limit));
+  if (offset > 0) url.searchParams.set("offset", String(offset));
+  else url.searchParams.delete("offset");
   window.history.replaceState({}, "", url);
 }
 
-async function runSearch(query, sort) {
-  if (!query) {
-    renderResults([], query);
-    updateSummary("", 0);
-    syncUrl("", sort);
-    return;
-  }
-
+async function runSearch(query, sort, offset = 0) {
   setLoading(true);
-  syncUrl(query, sort);
+  syncUrl(query, sort, offset);
   try {
     const params = new URLSearchParams({
       q: query,
       sort,
       limit: String(initialState.limit || 50),
+      offset: String(offset),
     });
     const response = await fetch(`${initialState.apiUrl}?${params.toString()}`);
     if (!response.ok) {
@@ -265,7 +263,7 @@ async function runSearch(query, sort) {
     }
     const payload = await response.json();
     renderResults(payload.results || [], payload.query || query);
-    updateSummary(payload.query || query, payload.count || 0);
+    updateSummary(payload.query || query, payload.total ?? payload.count ?? 0);
     resultStatus.textContent = payload.last_run_summary || "";
   } catch (error) {
     resultsList.innerHTML = emptyState("Search unavailable.", error instanceof Error ? error.message : "Unable to load search results.");
@@ -281,29 +279,22 @@ function initialize() {
   sortSelect.value = initialState.sort || "ending_soonest";
   updateIndexStatus();
   updateTimeLeft();
-
-  if (!initialState.query) {
-    renderResults([], "");
-    updateSummary("", 0);
-  }
+  renderResults(initialState.results || [], initialState.query);
+  updateSummary(initialState.query, initialState.total || initialState.results.length || 0);
 
   form?.addEventListener("submit", (event) => {
     event.preventDefault();
-    void runSearch(queryInput.value.trim(), sortSelect.value);
+    void runSearch(queryInput.value.trim(), sortSelect.value, 0);
   });
 
   sortSelect?.addEventListener("change", () => {
-    if (queryInput.value.trim()) {
-      void runSearch(queryInput.value.trim(), sortSelect.value);
-    } else {
-      syncUrl("", sortSelect.value);
-    }
+    void runSearch(queryInput.value.trim(), sortSelect.value, 0);
   });
 
   clearButton?.addEventListener("click", () => {
     queryInput.value = "";
     queryInput.focus();
-    void runSearch("", sortSelect.value);
+    void runSearch("", sortSelect.value, 0);
   });
 
   window.setInterval(updateTimeLeft, TIMELEFT_UPDATE_MS);

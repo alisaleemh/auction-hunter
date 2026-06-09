@@ -25,8 +25,16 @@ def _parse_limit(value: str | None, default: int = 50) -> int:
         return default
 
 
-def run_search(query: str, sort_by: str = "relevance", limit: int = 50) -> tuple[list[dict], list[str]]:
-    return store.query_results(query, sort_by=sort_by, limit=limit), []
+def _parse_offset(value: str | None, default: int = 0) -> int:
+    try:
+        return max(0, int(value or default))
+    except (TypeError, ValueError):
+        return default
+
+
+def run_search(query: str, sort_by: str = "relevance", limit: int = 50, offset: int = 0) -> tuple[list[dict], int, list[str]]:
+    results, total = store.query_results(query, sort_by=sort_by, limit=limit, offset=offset)
+    return results, total, []
 
 
 @app.get("/")
@@ -34,9 +42,20 @@ def index():
     query = request.args.get("q", "").strip()
     sort_by = request.args.get("sort", "ending_soonest").strip() or "ending_soonest"
     limit = _parse_limit(request.args.get("limit"), 50)
-    results, errors = run_search(query, sort_by=sort_by, limit=limit) if query else ([], [])
+    offset = _parse_offset(request.args.get("offset"), 0)
+    results, total, errors = run_search(query, sort_by=sort_by, limit=limit, offset=offset)
     metadata = store.get_metadata()
-    return render_template("index.html", query=query, sort=sort_by, limit=limit, results=results, errors=errors, metadata=metadata)
+    return render_template(
+        "index.html",
+        query=query,
+        sort=sort_by,
+        limit=limit,
+        offset=offset,
+        results=results,
+        total=total,
+        errors=errors,
+        metadata=metadata,
+    )
 
 
 @app.get("/api/search")
@@ -44,12 +63,15 @@ def api_search():
     query = request.args.get("q", "").strip()
     sort_by = request.args.get("sort", "relevance").strip() or "relevance"
     limit = _parse_limit(request.args.get("limit"), 50)
-    results, errors = run_search(query, sort_by=sort_by, limit=limit) if query else ([], [])
+    offset = _parse_offset(request.args.get("offset"), 0)
+    results, total, errors = run_search(query, sort_by=sort_by, limit=limit, offset=offset)
     metadata = store.get_metadata()
     return jsonify(
         {
             "query": query,
             "count": len(results),
+            "total": total,
+            "offset": offset,
             "results": results,
             "errors": errors,
             "sort": sort_by,

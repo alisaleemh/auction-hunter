@@ -47,8 +47,9 @@ def test_upsert_and_query_results(tmp_path):
         ],
     )
     store.prune_source_rows("HiBid", run_id, to_iso(now + timedelta(days=7)))
-    results = store.query_results("baby stair gate", now=now)
+    results, total = store.query_results("baby stair gate", now=now)
     assert len(results) == 1
+    assert total == 1
     assert results[0]["lot_title"] == "Baby Stair Gate"
 
 
@@ -70,7 +71,36 @@ def test_prune_stale_rows(tmp_path):
     store.upsert_snapshot("HiBid", second_run, to_iso(now + timedelta(hours=1)), [], [])
     store.prune_source_rows("HiBid", second_run, to_iso(now + timedelta(days=7)))
 
-    assert store.query_results("gate", now=now) == []
+    results, total = store.query_results("gate", now=now)
+    assert results == []
+    assert total == 0
+
+
+def test_query_results_returns_all_for_empty_query(tmp_path):
+    store = AuctionStore(tmp_path / "index.sqlite3")
+    store.upsert_source_status("HiBid", "success", "2026-04-18T00:00:00+00:00", "2026-04-18T00:00:00+00:00", None)
+    now = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    run_id = store.start_index_run("manual", to_iso(now))
+    store.upsert_snapshot(
+        "HiBid",
+        run_id,
+        to_iso(now),
+        [_auction("a1")],
+        [
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="a1",
+                provider_lot_id="l1",
+                title="Gate",
+                end_time=to_iso(now + timedelta(days=1)),
+                url="https://example.com/lot/1",
+            )
+        ],
+    )
+    store.prune_source_rows("HiBid", run_id, to_iso(now + timedelta(days=7)))
+    results, total = store.query_results("", now=now)
+    assert total == 1
+    assert len(results) == 1
 
 
 def test_metadata_reflects_last_run(tmp_path):

@@ -39,12 +39,12 @@
       <section class="results-shell">
         <div class="results-header">
           <div>
-            <h2 id="results-title">{{ "Results" if query else "Search products across indexed auctions." }}</h2>
+            <h2 id="results-title">{{ "Results" if query else "All indexed lots" }}</h2>
             <p id="results-subtitle" class="muted">
               {% if query %}
-                {{ results|length }} matches for "{{ query }}"
+                {{ results|length }} of {{ total }} matches for "{{ query }}"
               {% else %}
-                Search products across indexed auctions.
+                {{ total }} indexed lots available to browse
               {% endif %}
             </p>
           </div>
@@ -59,18 +59,31 @@
         {% endif %}
 
         <div id="results-list" class="results-list">
-          {% if query %}
-            {% if results %}
-              {% for result in results %}
-                {{ result_card(result) }}
-              {% endfor %}
-            {% else %}
-              {{ empty_state("No products found.", "Try a broader search term.") }}
-            {% endif %}
+          {% if results %}
+            {% for result in results %}
+              {{ result_card(result) }}
+            {% endfor %}
           {% else %}
-            {{ empty_state("Search products across indexed auctions.", "Use the search box to find matching lots.") }}
+            {% if query %}
+              {{ empty_state("No products found.", "Try a broader search term.") }}
+            {% else %}
+              {{ empty_state("No products found.", "The index is empty.") }}
+            {% endif %}
           {% endif %}
         </div>
+        {% if total > limit %}
+          <div class="pagination">
+            <a class="link-button{% if offset <= 0 %} disabled{% endif %}"
+               href="{{ url_for('index', q=query, sort=sort, limit=limit, offset=(offset - limit if offset > 0 else 0)) }}"
+               aria-disabled="{{ 'true' if offset <= 0 else 'false' }}">Previous</a>
+            <span class="pagination-note">
+              Showing {{ offset + 1 }}-{{ [offset + results|length, total]|min }} of {{ total }}
+            </span>
+            <a class="link-button{% if offset + limit >= total %} disabled{% endif %}"
+               href="{{ url_for('index', q=query, sort=sort, limit=limit, offset=offset + limit) }}"
+               aria-disabled="{{ 'true' if offset + limit >= total else 'false' }}">Next</a>
+          </div>
+        {% endif %}
       </section>
     </main>
 
@@ -80,6 +93,8 @@
       data-query="{{ query }}"
       data-sort="{{ sort }}"
       data-limit="{{ limit }}"
+      data-offset="{{ offset }}"
+      data-total="{{ total }}"
       data-indexed-at="{{ metadata.indexed_at or '' }}"
       data-last-run-status="{{ metadata.last_run_status or '' }}"
       data-last-run-finished-at="{{ metadata.last_run_finished_at or '' }}"

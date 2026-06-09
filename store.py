@@ -394,12 +394,20 @@ class AuctionStore:
                 (source_id, source_id),
             )
 
-    def query_results(self, query: str, now: datetime | None = None, sort_by: str = "relevance", limit: int = 50) -> list[dict]:
+    def query_results(
+        self,
+        query: str,
+        now: datetime | None = None,
+        sort_by: str = "relevance",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
         current = now or utc_now()
         now_iso = to_iso(current)
         window_end = to_iso(current + timedelta(days=7))
         token_groups = expanded_query_tokens(query)
         limit = max(1, min(int(limit or 50), 100))
+        offset = max(0, int(offset or 0))
         sql = """
             SELECT
                 s.name AS source,
@@ -462,8 +470,9 @@ class AuctionStore:
                 }
             )
         filtered = filter_and_sort_results(results, query)
+        total = len(filtered)
         if sort_by == "relevance":
-            return filtered[:limit]
+            return filtered[offset : offset + limit], total
 
         def sort_key(result: dict) -> tuple:
             current_bid = result.get("current_bid")
@@ -481,7 +490,7 @@ class AuctionStore:
             return (end_sort, title.lower())
 
         filtered.sort(key=sort_key)
-        return filtered[:limit]
+        return filtered[offset : offset + limit], total
 
     def get_metadata(self) -> SearchMetadata:
         with self.connect() as conn:
