@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+import threading
+import time
 
 import app as auction_app
 from models import make_lot_record
@@ -115,6 +117,7 @@ def test_get_root_empty_query(tmp_path, monkeypatch):
     response = client.get("/")
     assert response.status_code == 200
     assert b"All indexed lots" in response.data
+    assert b"Reindex now" in response.data
 
 
 def test_get_root_renders_indexed_results(tmp_path, monkeypatch):
@@ -147,6 +150,60 @@ def test_api_search_returns_indexed_shape(tmp_path, monkeypatch):
     assert payload["indexed_lot_count"] == 1
     assert payload["indexed_auction_count"] == 1
     assert "time_left" in payload["results"][0]
+
+
+def test_api_status_reports_indexing_state(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+    response = client.get("/api/status")
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["indexing"] is False
+
+
+def test_api_reindex_starts_and_reports_running(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    monkeypatch.setattr(auction_app, "store", test_store)
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_run_index(store, scope="manual", now=None, provider_loaders=None):
+        run_id = store.start_index_run(scope, "2026-04-18T00:00:00+00:00")
+        started.set()
+        release.wait(timeout=5)
+        store.finish_index_run(
+            run_id,
+            "2026-04-18T00:05:00+00:00",
+            {"HiBid": {"status": "success", "auctions": 1, "lots": 1}},
+            "1/1 sources indexed",
+            None,
+        )
+        return {"run_id": run_id, "summary": "1/1 sources indexed", "errors": [], "source_stats": {}}
+
+    monkeypatch.setattr(auction_app, "run_index", fake_run_index)
+    client = auction_app.app.test_client()
+
+    first = client.post("/api/reindex")
+    assert first.status_code == 202
+    assert started.wait(timeout=1)
+
+    in_progress = client.get("/api/status")
+    assert in_progress.get_json()["indexing"] is True
+
+    conflict = client.post("/api/reindex")
+    assert conflict.status_code == 409
+    assert conflict.get_json()["status"] == "running"
+
+    release.set()
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        status = client.get("/api/status").get_json()
+        if not status["indexing"]:
+            break
+        time.sleep(0.05)
+    assert client.get("/api/status").get_json()["indexing"] is False
 
 
 def test_api_search_returns_normalized_relative_image_urls(tmp_path, monkeypatch):

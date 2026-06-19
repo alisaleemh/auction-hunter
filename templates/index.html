@@ -20,6 +20,8 @@
           <span class="pill" id="index-status" data-indexed-at="{{ metadata.indexed_at or '' }}">
             Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
           </span>
+          <button type="button" class="pill action-pill" id="reindex-button">Reindex now</button>
+          <span class="pill subtle reindex-status" id="reindex-status" aria-live="polite">Checking reindex status...</span>
           {% if metadata.indexed_lot_count is not none %}
             <span class="pill subtle">
               Indexed {{ metadata.indexed_lot_count }} lots{% if metadata.indexed_auction_count is not none %} across {{ metadata.indexed_auction_count }} auctions{% endif %}{% if metadata.indexed_source_count is not none %} from {{ metadata.indexed_source_count }} sources{% endif %}
@@ -95,6 +97,9 @@
       data-limit="{{ limit }}"
       data-offset="{{ offset }}"
       data-total="{{ total }}"
+      data-indexing="{{ 'true' if metadata.indexing else 'false' }}"
+      data-current-run-started-at="{{ metadata.current_run_started_at or '' }}"
+      data-current-run-scope="{{ metadata.current_run_scope or '' }}"
       data-indexed-at="{{ metadata.indexed_at or '' }}"
       data-last-run-status="{{ metadata.last_run_status or '' }}"
       data-last-run-finished-at="{{ metadata.last_run_finished_at or '' }}"
