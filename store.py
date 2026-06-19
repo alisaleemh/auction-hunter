@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urljoin
 
 from search import expanded_query_tokens, filter_and_sort_results
 
@@ -144,7 +145,20 @@ def format_time_left(end_time: str | None, now: datetime | None = None) -> str:
     return " ".join(parts)
 
 
-def _extract_image_url(raw_payload_json: str | None) -> str | None:
+def _normalize_image_url(value: str, base_url: str | None = None) -> str | None:
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if cleaned.startswith("//"):
+        return f"https:{cleaned}"
+    if cleaned.startswith(("http://", "https://")):
+        return cleaned
+    if base_url and cleaned.startswith("/"):
+        return urljoin(base_url, cleaned)
+    return None
+
+
+def _extract_image_url(raw_payload_json: str | None, base_url: str | None = None) -> str | None:
     if not raw_payload_json:
         return None
     try:
@@ -152,14 +166,38 @@ def _extract_image_url(raw_payload_json: str | None) -> str | None:
     except json.JSONDecodeError:
         return None
 
-    candidate_keys = ("image_url", "imageUrl", "thumbnail", "thumbnail_url", "thumbnailUrl", "photo", "photo_url", "photoUrl", "image", "img")
+    candidate_keys = (
+        "image_url",
+        "imageUrl",
+        "image",
+        "img",
+        "thumbnail",
+        "thumbnail_url",
+        "thumbnailUrl",
+        "photo",
+        "photo_url",
+        "photoUrl",
+        "primary_image",
+        "primaryImage",
+        "main_image",
+        "mainImage",
+        "cover_image",
+        "coverImage",
+    )
 
     def walk(value: object) -> str | None:
         if isinstance(value, dict):
             for key in candidate_keys:
                 candidate = value.get(key)
-                if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
-                    return candidate
+                if isinstance(candidate, str):
+                    normalized = _normalize_image_url(candidate, base_url)
+                    if normalized:
+                        return normalized
+                elif isinstance(candidate, list):
+                    for item in candidate:
+                        found = walk(item)
+                        if found:
+                            return found
             for nested in value.values():
                 found = walk(nested)
                 if found:
@@ -169,9 +207,10 @@ def _extract_image_url(raw_payload_json: str | None) -> str | None:
                 found = walk(item)
                 if found:
                     return found
-        elif isinstance(value, str) and value.startswith(("http://", "https://")):
-            if any(value.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif")):
-                return value
+        elif isinstance(value, str):
+            normalized = _normalize_image_url(value, base_url)
+            if normalized and any(normalized.lower().split("?", 1)[0].endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif")):
+                return normalized
         return None
 
     return walk(payload)
@@ -440,7 +479,7 @@ class AuctionStore:
             rows = conn.execute(sql, params).fetchall()
         results = []
         for row in rows:
-            image_url = _extract_image_url(row["raw_payload_json"])
+            image_url = _extract_image_url(row["raw_payload_json"], row["url"])
             results.append(
                 {
                     "source": row["source"],

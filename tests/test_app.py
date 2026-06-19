@@ -149,6 +149,65 @@ def test_api_search_returns_indexed_shape(tmp_path, monkeypatch):
     assert "time_left" in payload["results"][0]
 
 
+def test_api_search_returns_normalized_relative_image_urls(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    now = datetime.now(timezone.utc)
+    started_at = now.isoformat()
+    test_store.upsert_source_status("HiBid", "success", started_at, started_at, None)
+    run_id = test_store.start_index_run("manual", started_at)
+    test_store.upsert_snapshot(
+        "HiBid",
+        run_id,
+        started_at,
+        [
+            {
+                "provider_auction_id": "a1",
+                "title": "Auction",
+                "url": "https://example.com/auction",
+                "address": "",
+                "city": "",
+                "state": "",
+                "postal_code": "",
+                "country": "",
+                "latitude": None,
+                "longitude": None,
+                "distance_miles": None,
+                "raw_payload": {"id": "a1"},
+            }
+        ],
+        [
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="a1",
+                provider_lot_id="l1",
+                title="Baby Gate",
+                lot_number="12",
+                condition="Open Box",
+                description="A gate",
+                current_bid=5,
+                shipping_available=True,
+                end_time=(now + timedelta(days=2, hours=2)).isoformat(),
+                url="https://example.com/lot/12",
+                raw_payload={"id": "l1", "images": [{"url": "/images/image.jpg"}]},
+            )
+        ],
+    )
+    test_store.prune_source_rows("HiBid", run_id, (now + timedelta(days=7)).isoformat())
+    test_store.finish_index_run(
+        run_id,
+        (now + timedelta(minutes=5)).isoformat(),
+        {"HiBid": {"status": "success", "auctions": 1, "lots": 1}},
+        "1/1 sources indexed",
+        None,
+    )
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+    response = client.get("/api/search?q=gate")
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["results"][0]["imageUrl"] == "https://example.com/images/image.jpg"
+
+
 def test_api_search_supports_sort_and_limit(tmp_path, monkeypatch):
     test_store = AuctionStore(tmp_path / "index.sqlite3")
     _seed_store_with_extra_lot(test_store)
