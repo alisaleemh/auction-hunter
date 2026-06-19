@@ -5,6 +5,8 @@ services:
     build: .
     restart: unless-stopped
     command: ["python", "app.py", "serve", "--port", "5001"]
+    environment:
+      DEPLOY_COMMIT: ${DEPLOY_COMMIT:-}
     ports:
       - "5001:5001"
     volumes:
@@ -20,6 +22,7 @@ services:
         "while true; do echo \"[$$(date -Iseconds)] index start\"; python -u app.py index; echo \"[$$(date -Iseconds)] index sleep $${INDEX_INTERVAL:-21600}s\"; sleep \"$${INDEX_INTERVAL:-21600}\"; done",
       ]
     environment:
+      DEPLOY_COMMIT: ${DEPLOY_COMMIT:-}
       INDEX_INTERVAL: ${AUCTION_INDEX_INTERVAL:-21600}
     volumes:
       - auction-data:/app/data

@@ -1,0 +1,57 @@
+name: Deploy Auction Hunter
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run a safe smoke test or a real deploy"
+        required: true
+        default: test
+        type: choice
+        options:
+          - test
+          - deploy
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, homelab, docker-compose, auction-hunter]
+    timeout-minutes: 30
+    env:
+      APP_DIR: /srv/auction-hunter
+      DEPLOY_FLAG: /srv/auction-hunter/.deploy-enabled
+      DEPLOY_MODE: ${{ inputs.mode }}
+
+    steps:
+      - name: Smoke test
+        run: |
+          cd "$APP_DIR"
+          whoami
+          hostname
+          docker version
+          docker compose version
+          docker compose config
+
+      - name: Decide whether to deploy
+        id: gate
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "${DEPLOY_MODE:-test}" == "deploy" ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$GITHUB_EVENT_NAME" == "push" && -f "$DEPLOY_FLAG" ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "deploy=false" >> "$GITHUB_OUTPUT"
+          echo "Deployment skipped. Pushes to main require $DEPLOY_FLAG; workflow_dispatch mode=test stays safe."
+
+      - name: Deploy
+        if: steps.gate.outputs.deploy == 'true'
+        run: |
+          cd "$APP_DIR"
+          ./deploy.sh
