@@ -39,6 +39,15 @@ def _fetch_text(session: requests.Session, url: str) -> str:
     return response.text
 
 
+def _extract_og_image_url(html: str) -> str | None:
+    soup = BeautifulSoup(html, "html.parser")
+    for selector in ('meta[property="og:image"]', 'meta[name="twitter:image"]'):
+        tag = soup.select_one(selector)
+        if tag and tag.get("content"):
+            return tag["content"].replace("&amp;", "&")
+    return None
+
+
 def _parse_state(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
     state_script = soup.select_one("script#hibid-state")
@@ -150,6 +159,16 @@ def _lot_record(lot: dict, apollo_state: dict, lot_links: dict[str, str]) -> tup
     end_time = _parse_hibid_end_time(lot_state)
     if end_time is None:
         return None, auction
+    lot_url = lot_links.get(str(lot.get("id")), urljoin(BASE_URL, f"/lot/{lot.get('id')}"))
+    client = _session()
+    image_url = None
+    try:
+        image_url = _extract_og_image_url(_fetch_text(client, lot_url))
+    except Exception:
+        image_url = None
+    lot_payload = dict(lot)
+    if image_url:
+        lot_payload["imageUrl"] = image_url
     lot_record = make_lot_record(
         source="HiBid",
         provider_auction_id=auction["provider_auction_id"],
@@ -163,8 +182,8 @@ def _lot_record(lot: dict, apollo_state: dict, lot_links: dict[str, str]) -> tup
         shipping_available=bool(lot.get("shippingOffered")),
         status="open" if lot_state.get("status") == "OPEN" else "closed",
         end_time=end_time,
-        url=lot_links.get(str(lot.get("id")), urljoin(BASE_URL, f"/lot/{lot.get('id')}")),
-        raw_payload=lot,
+        url=lot_url,
+        raw_payload=lot_payload,
     )
     return lot_record, auction
 
