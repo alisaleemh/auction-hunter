@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,8 @@ BASE_URL = "https://kotnauction.com"
 AUCTIONS_URL = f"{BASE_URL}/auctions/all"
 REQUEST_TIMEOUT = 15
 PAGE_LENGTH = 100
+MAX_AUCTION_WORKERS = 3
+MAX_PAGE_WORKERS = 8
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -57,6 +60,17 @@ def _parse_listing_data(html: str) -> dict[str, dict]:
         raise ValueError("King of the North page is missing listingData")
     parsed = json.loads(match.group(1))
     return {str(key): value for key, value in parsed.items()}
+
+
+def _max_page_number(html: str) -> int:
+    soup = BeautifulSoup(html, "html.parser")
+    pages = [1]
+    for anchor in soup.select("a[href*='page=']"):
+        href = anchor.get("href", "")
+        match = re.search(r"[?&]page=(\d+)", href)
+        if match:
+            pages.append(int(match.group(1)))
+    return max(pages) if pages else 1
 
 
 def _auction_title_from_html(html: str) -> str:
@@ -213,33 +227,57 @@ def _auction_page_url(auction_url: str, page_number: int) -> str:
     return base if page_number <= 1 else f"{base}&page={page_number}"
 
 
+def _fetch_auction_page(auction_url: str, page_number: int) -> tuple[int, str]:
+    client = _session()
+    return page_number, _fetch_text(client, _auction_page_url(auction_url, page_number))
+
+
+def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime) -> tuple[dict, list[dict]]:
+    first_page_html = _fetch_text(_session(), _auction_page_url(auction_url, 1))
+    match = re.search(r"/auctions/(\d+)$", auction_url)
+    if not match:
+        raise ValueError(f"Invalid auction URL: {auction_url}")
+    auction_id = match.group(1)
+    auction, first_page_lots, _, _ = _parse_lots_page(
+        auction_id,
+        auction_url,
+        first_page_html,
+        window_end=window_end,
+    )
+    lots_by_id = {lot["provider_lot_id"]: lot for lot in first_page_lots}
+    total_pages = _max_page_number(first_page_html)
+
+    if total_pages > 1:
+        page_numbers = list(range(2, total_pages + 1))
+        with ThreadPoolExecutor(max_workers=min(MAX_PAGE_WORKERS, len(page_numbers))) as executor:
+            futures = [executor.submit(_fetch_auction_page, auction_url, page_number) for page_number in page_numbers]
+            for future in as_completed(futures):
+                _, page_html = future.result()
+                _, page_lots, _, _ = _parse_lots_page(
+                    auction_id,
+                    auction_url,
+                    page_html,
+                    window_end=window_end,
+                )
+                for lot in page_lots:
+                    lots_by_id[lot["provider_lot_id"]] = lot
+
+    return auction, list(lots_by_id.values())
+
+
 def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
     current = _reference_now(config)
     window_end = current + timedelta(days=7)
-    client = _session()
-    listing_html = _fetch_text(client, AUCTIONS_URL)
+    listing_html = _fetch_text(_session(), AUCTIONS_URL)
     auction_urls = _current_auction_urls(listing_html)
     auctions: dict[str, dict] = {}
     lots: list[dict] = []
 
-    for auction_url in auction_urls:
-        match = re.search(r"/auctions/(\d+)$", auction_url)
-        if not match:
-            continue
-        auction_id = match.group(1)
-        page_number = 1
-        while True:
-            page_html = _fetch_text(client, _auction_page_url(auction_url, page_number))
-            auction, page_lots, page_min_end, has_next = _parse_lots_page(
-                auction_id,
-                auction_url,
-                page_html,
-                window_end=window_end,
-            )
-            auctions[auction_id] = auction
-            lots.extend(page_lots)
-            if page_min_end is None or page_min_end > window_end or not has_next:
-                break
-            page_number += 1
+    with ThreadPoolExecutor(max_workers=min(MAX_AUCTION_WORKERS, len(auction_urls) or 1)) as executor:
+        futures = [executor.submit(_fetch_auction_snapshot, auction_url, window_end=window_end) for auction_url in auction_urls]
+        for future in as_completed(futures):
+            auction, auction_lots = future.result()
+            auctions[auction["provider_auction_id"]] = auction
+            lots.extend(auction_lots)
 
     return ProviderSnapshot(source=SOURCE_NAME, auctions=list(auctions.values()), lots=lots)
