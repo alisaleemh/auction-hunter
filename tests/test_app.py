@@ -155,11 +155,13 @@ def test_api_search_returns_indexed_shape(tmp_path, monkeypatch):
 def test_api_status_reports_indexing_state(tmp_path, monkeypatch):
     test_store = AuctionStore(tmp_path / "index.sqlite3")
     monkeypatch.setattr(auction_app, "store", test_store)
+    monkeypatch.setattr(auction_app, "deploy_commit", "2f7a19e")
     client = auction_app.app.test_client()
     response = client.get("/api/status")
     payload = response.get_json()
     assert response.status_code == 200
     assert payload["indexing"] is False
+    assert payload["deploy_commit"] == "2f7a19e"
 
 
 def test_api_index_config_round_trip(tmp_path, monkeypatch):

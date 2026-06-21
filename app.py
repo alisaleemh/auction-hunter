@@ -19,11 +19,13 @@ store = AuctionStore(DB_PATH)
 app = Flask(__name__)
 nightly_indexer: NightlyIndexer | None = None
 manual_index_lock = threading.Lock()
+deploy_commit = os.environ.get("DEPLOY_COMMIT", "").strip() or None
 
 
 def metadata_payload() -> dict:
     metadata = store.get_metadata()
     return {
+        "deploy_commit": deploy_commit,
         "indexed_at": metadata.indexed_at,
         "last_run_status": metadata.last_run_status,
         "last_run_finished_at": metadata.last_run_finished_at,

@@ -20,6 +20,11 @@
           <span class="pill" id="index-status" data-indexed-at="{{ metadata.indexed_at or '' }}">
             Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
           </span>
+          {% if metadata.deploy_commit %}
+            <span class="pill subtle" title="Commit deployed in the current container">
+              Deployed commit {{ metadata.deploy_commit }}
+            </span>
+          {% endif %}
           {% if metadata.last_run_duration_seconds is not none %}
             <span class="pill subtle">
               Last index took {{ "%.1f"|format(metadata.last_run_duration_seconds) }}s
@@ -141,6 +146,7 @@
       data-current-run-started-at="{{ metadata.current_run_started_at or '' }}"
       data-current-run-scope="{{ metadata.current_run_scope or '' }}"
       data-indexed-at="{{ metadata.indexed_at or '' }}"
+      data-deploy-commit="{{ metadata.deploy_commit or '' }}"
       data-last-run-status="{{ metadata.last_run_status or '' }}"
       data-last-run-finished-at="{{ metadata.last_run_finished_at or '' }}"
       data-last-run-summary="{{ metadata.last_run_summary or '' }}"

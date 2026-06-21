@@ -25,6 +25,7 @@ const initialState = {
   offset: Number(stateNode?.dataset.offset || 0),
   total: Number(stateNode?.dataset.total || 0),
   indexedAt: stateNode?.dataset.indexedAt || "",
+  deployCommit: stateNode?.dataset.deployCommit || "",
   lastRunStatus: stateNode?.dataset.lastRunStatus || "",
   lastRunFinishedAt: stateNode?.dataset.lastRunFinishedAt || "",
   lastRunSummary: stateNode?.dataset.lastRunSummary || "",

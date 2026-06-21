@@ -244,6 +244,15 @@ class AuctionStore:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout = 30000")
             conn.executescript(SCHEMA)
+            self._ensure_schema_migrations(conn)
+
+    def _ensure_schema_migrations(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(sources)").fetchall()
+        }
+        if "config_json" not in columns:
+            conn.execute("ALTER TABLE sources ADD COLUMN config_json TEXT")
 
     def start_index_run(self, scope: str, started_at: str) -> int:
         with self.connect() as conn:
