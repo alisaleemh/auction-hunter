@@ -37,6 +37,10 @@ def metadata_payload() -> dict:
         "indexed_auction_count": metadata.indexed_auction_count,
         "indexed_lot_count": metadata.indexed_lot_count,
         "last_run_duration_seconds": metadata.last_run_duration_seconds,
+        "progress_total": metadata.progress_total,
+        "progress_done": metadata.progress_done,
+        "progress_percent": metadata.progress_percent,
+        "progress_message": metadata.progress_message,
     }
 
 
