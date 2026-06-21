@@ -91,6 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_auctions_source ON auctions(source_id);
 
 @dataclass(frozen=True)
 class SearchMetadata:
+    deploy_commit: str | None
     indexed_at: str | None
     last_run_status: str | None
     last_run_finished_at: str | None
@@ -626,6 +627,7 @@ class AuctionStore:
             indexed_lot_count = sum(int(stats.get("lots", 0) or 0) for stats in source_stats.values())
         indexing = bool(last_run and last_run["finished_at"] is None)
         return SearchMetadata(
+            deploy_commit=None,
             indexed_at=(last_success["finished_at"] if last_success else None) or (latest_lot_indexed["indexed_at"] if latest_lot_indexed else None),
             last_run_status=None if last_run is None else ("error" if last_run["error_text"] else "success"),
             last_run_finished_at=last_run["finished_at"] if last_run else None,

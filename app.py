@@ -107,6 +107,7 @@ def index():
         total=total,
         errors=errors,
         metadata=metadata,
+        deploy_commit=deploy_commit,
         index_sources=source_config_payload(),
     )
 
