@@ -19,6 +19,7 @@ REQUEST_TIMEOUT = 15
 PAGE_LENGTH = 100
 MAX_AUCTION_WORKERS = 3
 MAX_PAGE_WORKERS = 8
+DEFAULT_MAX_PAGES_PER_AUCTION = 1
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -232,7 +233,7 @@ def _fetch_auction_page(auction_url: str, page_number: int) -> tuple[int, str]:
     return page_number, _fetch_text(client, _auction_page_url(auction_url, page_number))
 
 
-def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime) -> tuple[dict, list[dict]]:
+def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime, max_pages: int) -> tuple[dict, list[dict]]:
     first_page_html = _fetch_text(_session(), _auction_page_url(auction_url, 1))
     match = re.search(r"/auctions/(\d+)$", auction_url)
     if not match:
@@ -247,8 +248,8 @@ def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime) -> tuple[
     lots_by_id = {lot["provider_lot_id"]: lot for lot in first_page_lots}
     total_pages = _max_page_number(first_page_html)
 
-    if total_pages > 1:
-        page_numbers = list(range(2, total_pages + 1))
+    if total_pages > 1 and max_pages > 1:
+        page_numbers = list(range(2, min(total_pages, max_pages) + 1))
         with ThreadPoolExecutor(max_workers=min(MAX_PAGE_WORKERS, len(page_numbers))) as executor:
             futures = [executor.submit(_fetch_auction_page, auction_url, page_number) for page_number in page_numbers]
             for future in as_completed(futures):
@@ -268,13 +269,17 @@ def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime) -> tuple[
 def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
     current = _reference_now(config)
     window_end = current + timedelta(days=7)
+    max_pages = max(1, int((config or {}).get("max_pages") or DEFAULT_MAX_PAGES_PER_AUCTION))
     listing_html = _fetch_text(_session(), AUCTIONS_URL)
     auction_urls = _current_auction_urls(listing_html)
     auctions: dict[str, dict] = {}
     lots: list[dict] = []
 
     with ThreadPoolExecutor(max_workers=min(MAX_AUCTION_WORKERS, len(auction_urls) or 1)) as executor:
-        futures = [executor.submit(_fetch_auction_snapshot, auction_url, window_end=window_end) for auction_url in auction_urls]
+        futures = [
+            executor.submit(_fetch_auction_snapshot, auction_url, window_end=window_end, max_pages=max_pages)
+            for auction_url in auction_urls
+        ]
         for future in as_completed(futures):
             auction, auction_lots = future.result()
             auctions[auction["provider_auction_id"]] = auction
