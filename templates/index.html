@@ -27,7 +27,12 @@
           {% endif %}
           {% if metadata.last_run_duration_seconds is not none %}
             <span class="pill subtle">
-              Last index took {{ "%.1f"|format(metadata.last_run_duration_seconds) }}s
+              Last run took {{ "%.0f"|format((metadata.last_run_duration_seconds / 60) if metadata.last_run_duration_seconds < 3600 else (metadata.last_run_duration_seconds / 3600)) }}{{ "m" if metadata.last_run_duration_seconds < 3600 else "h" }}
+            </span>
+          {% endif %}
+          {% if metadata.last_success_duration_seconds is not none %}
+            <span class="pill subtle">
+              Last successful index took {{ "%.0f"|format((metadata.last_success_duration_seconds / 60) if metadata.last_success_duration_seconds < 3600 else (metadata.last_success_duration_seconds / 3600)) }}{{ "m" if metadata.last_success_duration_seconds < 3600 else "h" }}
             </span>
           {% endif %}
           <button type="button" class="pill action-pill" id="reindex-button">Reindex now</button>
