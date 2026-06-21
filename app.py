@@ -34,7 +34,31 @@ def metadata_payload() -> dict:
         "indexed_source_count": metadata.indexed_source_count,
         "indexed_auction_count": metadata.indexed_auction_count,
         "indexed_lot_count": metadata.indexed_lot_count,
+        "last_run_duration_seconds": metadata.last_run_duration_seconds,
     }
+
+
+def source_config_payload() -> list[dict]:
+    sources = {source["name"]: source for source in store.get_sources()}
+    return [
+        {
+            "name": "HiBid",
+            "label": "HiBid",
+            "enabled": True,
+            "fields": [
+                {"key": "zip_code", "label": "ZIP code", "type": "text", "default": "L9T 8N6"},
+                {"key": "miles", "label": "Radius (miles)", "type": "number", "default": 25},
+            ],
+            "config": sources.get("HiBid", {}).get("config", {}),
+        },
+        {
+            "name": "403 Auction",
+            "label": "403 Auction",
+            "enabled": True,
+            "fields": [],
+            "config": sources.get("403 Auction", {}).get("config", {}),
+        },
+    ]
 
 
 def _manual_reindex_worker() -> None:
@@ -81,6 +105,7 @@ def index():
         total=total,
         errors=errors,
         metadata=metadata,
+        index_sources=source_config_payload(),
     )
 
 
@@ -110,6 +135,26 @@ def api_search():
 @app.get("/api/status")
 def api_status():
     return jsonify(metadata_payload())
+
+
+@app.get("/api/index-config")
+def api_index_config():
+    return jsonify({"sources": source_config_payload()})
+
+
+@app.post("/api/index-config")
+def api_index_config_update():
+    payload = request.get_json(silent=True) or {}
+    sources = payload.get("sources") or {}
+    if not isinstance(sources, dict):
+        return jsonify({"error": "sources must be an object"}), 400
+    updated = []
+    for source_name, config in sources.items():
+        if not isinstance(config, dict):
+            continue
+        store.upsert_source_config(source_name, config)
+        updated.append(source_name)
+    return jsonify({"status": "ok", "updated": updated, **{"sources": source_config_payload()}})
 
 
 @app.post("/api/reindex")

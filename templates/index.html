@@ -20,6 +20,11 @@
           <span class="pill" id="index-status" data-indexed-at="{{ metadata.indexed_at or '' }}">
             Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
           </span>
+          {% if metadata.last_run_duration_seconds is not none %}
+            <span class="pill subtle">
+              Last index took {{ "%.1f"|format(metadata.last_run_duration_seconds) }}s
+            </span>
+          {% endif %}
           <button type="button" class="pill action-pill" id="reindex-button">Reindex now</button>
           <span class="pill subtle reindex-status" id="reindex-status" aria-live="polite">Checking reindex status...</span>
           {% if metadata.indexed_lot_count is not none %}
@@ -31,6 +36,41 @@
             <span class="pill subtle">{{ metadata.last_run_status|capitalize }}{% if metadata.last_run_finished_at %} · {{ metadata.last_run_finished_at }}{% endif %}</span>
           {% endif %}
         </div>
+      </section>
+
+      <section class="config-shell">
+        <div class="results-header">
+          <div>
+            <h2>Index controls</h2>
+            <p class="muted">Change what gets scraped, then save and reindex.</p>
+          </div>
+          <div class="status-note" id="config-status" aria-live="polite"></div>
+        </div>
+        <form id="index-config-form" class="config-grid">
+          {% for source in index_sources %}
+            <section class="config-card" data-source-name="{{ source.name }}">
+              <h3>{{ source.label }}</h3>
+              {% if source.fields %}
+                {% for field in source.fields %}
+                  <label class="field">
+                    <span>{{ field.label }}</span>
+                    <input
+                      type="{{ field.type }}"
+                      name="{{ source.name }}.{{ field.key }}"
+                      value="{{ source.config.get(field.key, field.default) }}"
+                      {% if field.type == "number" %}min="1" step="1"{% endif %}
+                    >
+                  </label>
+                {% endfor %}
+              {% else %}
+                <p class="muted">No custom settings.</p>
+              {% endif %}
+            </section>
+          {% endfor %}
+          <div class="config-actions">
+            <button type="submit" class="primary-button">Save index settings</button>
+          </div>
+        </form>
       </section>
 
       <section class="search-shell">
@@ -104,6 +144,7 @@
       data-last-run-status="{{ metadata.last_run_status or '' }}"
       data-last-run-finished-at="{{ metadata.last_run_finished_at or '' }}"
       data-last-run-summary="{{ metadata.last_run_summary or '' }}"
+      data-last-run-duration-seconds="{{ metadata.last_run_duration_seconds or '' }}"
     ></div>
     <script>
       window.__INITIAL_RESULTS__ = {{ results|tojson }};

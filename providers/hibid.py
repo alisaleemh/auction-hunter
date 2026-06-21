@@ -15,7 +15,8 @@ from models import ProviderSnapshot, make_lot_record
 
 
 BASE_URL = "https://hibid.com"
-LOTS_URL = f"{BASE_URL}/lots?zip=L9T%208N6&miles=25"
+DEFAULT_ZIP = "L9T 8N6"
+DEFAULT_MILES = 25
 PAGE_LENGTH = 100
 REQUEST_TIMEOUT = 15
 MAX_PAGE_WORKERS = 8
@@ -188,13 +189,18 @@ def _lot_record(lot: dict, apollo_state: dict, lot_links: dict[str, str]) -> tup
     return lot_record, auction
 
 
-def _page_url(page_number: int) -> str:
-    return LOTS_URL if page_number <= 1 else f"{LOTS_URL}&apage={page_number}"
+def _lots_url(zip_code: str, miles: int) -> str:
+    return f"{BASE_URL}/lots?zip={requests.utils.quote(zip_code)}&miles={miles}"
 
 
-def _fetch_page(page_number: int) -> tuple[int, str]:
+def _page_url(page_number: int, zip_code: str, miles: int) -> str:
+    lots_url = _lots_url(zip_code, miles)
+    return lots_url if page_number <= 1 else f"{lots_url}&apage={page_number}"
+
+
+def _fetch_page(page_number: int, zip_code: str, miles: int) -> tuple[int, str]:
     client = _session()
-    return page_number, _fetch_text(client, _page_url(page_number))
+    return page_number, _fetch_text(client, _page_url(page_number, zip_code, miles))
 
 
 def _collect_page_snapshot(html: str, lots: list[dict], auctions: dict[str, dict], seen_lots: set[str]) -> tuple[int, int]:
@@ -216,9 +222,12 @@ def _collect_page_snapshot(html: str, lots: list[dict], auctions: dict[str, dict
     return current_page, total_pages
 
 
-def fetch_snapshot() -> ProviderSnapshot:
+def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
+    config = config or {}
+    zip_code = str(config.get("zip_code") or DEFAULT_ZIP)
+    miles = int(config.get("miles") or DEFAULT_MILES)
     client = _session()
-    first_page_html = _fetch_text(client, LOTS_URL)
+    first_page_html = _fetch_text(client, _lots_url(zip_code, miles))
     lots: list[dict] = []
     auctions: dict[str, dict] = {}
     seen_lots: set[str] = set()
@@ -228,7 +237,7 @@ def fetch_snapshot() -> ProviderSnapshot:
 
         page_numbers = list(range(2, total_pages + 1))
         with ThreadPoolExecutor(max_workers=min(MAX_PAGE_WORKERS, len(page_numbers))) as executor:
-            futures = [executor.submit(_fetch_page, page_number) for page_number in page_numbers]
+            futures = [executor.submit(_fetch_page, page_number, zip_code, miles) for page_number in page_numbers]
             for future in as_completed(futures):
                 _, html = future.result()
                 _collect_page_snapshot(html, lots, auctions, seen_lots)

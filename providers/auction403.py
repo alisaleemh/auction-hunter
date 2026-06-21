@@ -190,7 +190,7 @@ def _fetch_auction_snapshot(auction_url: str) -> tuple[dict, list[dict]]:
     return auction, lots
 
 
-def fetch_snapshot() -> ProviderSnapshot:
+def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
     client = _session()
     listing_html = _fetch_text(client, AUCTIONS_URL)
     auction_urls = _current_auction_urls(listing_html)

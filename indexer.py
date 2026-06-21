@@ -45,9 +45,17 @@ def run_index(
     current = (now or utc_now()).astimezone(timezone.utc)
     started_at = to_iso(current)
     run_id = store.start_index_run(scope=scope, started_at=started_at)
+    source_configs = {source["name"]: source.get("config") or {} for source in store.get_sources()}
+
+    def hibid_loader() -> ProviderSnapshot:
+        return hibid.fetch_snapshot(source_configs.get("HiBid", {}))
+
+    def auction403_loader() -> ProviderSnapshot:
+        return auction403.fetch_snapshot(source_configs.get("403 Auction", {}))
+
     loaders = provider_loaders or {
-        "HiBid": hibid.fetch_snapshot,
-        "403 Auction": auction403.fetch_snapshot,
+        "HiBid": hibid_loader,
+        "403 Auction": auction403_loader,
     }
 
     source_stats: dict[str, dict] = {}

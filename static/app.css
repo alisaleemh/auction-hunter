@@ -78,6 +78,15 @@ select {
   margin-bottom: 16px;
 }
 
+.config-shell {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
+  box-shadow: var(--shadow);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
 .hero {
   display: flex;
   justify-content: space-between;
@@ -250,6 +259,47 @@ select {
   gap: 12px;
   align-items: flex-start;
   margin-bottom: 14px;
+}
+
+.config-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.config-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--panel-soft);
+}
+
+.config-card h3 {
+  margin: 0 0 12px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.field span {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.field input {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 0 12px;
+  background: white;
+}
+
+.config-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .results-header h2 {

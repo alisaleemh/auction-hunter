@@ -14,6 +14,8 @@ const resultStatus = document.getElementById("result-status");
 const indexStatus = document.getElementById("index-status");
 const reindexButton = document.getElementById("reindex-button");
 const reindexStatus = document.getElementById("reindex-status");
+const configForm = document.getElementById("index-config-form");
+const configStatus = document.getElementById("config-status");
 
 const initialState = {
   apiUrl: stateNode?.dataset.apiUrl || "/api/search",
@@ -26,6 +28,7 @@ const initialState = {
   lastRunStatus: stateNode?.dataset.lastRunStatus || "",
   lastRunFinishedAt: stateNode?.dataset.lastRunFinishedAt || "",
   lastRunSummary: stateNode?.dataset.lastRunSummary || "",
+  lastRunDurationSeconds: Number(stateNode?.dataset.lastRunDurationSeconds || 0),
   indexing: stateNode?.dataset.indexing === "true",
   currentRunStartedAt: stateNode?.dataset.currentRunStartedAt || "",
   currentRunScope: stateNode?.dataset.currentRunScope || "",
@@ -201,8 +204,42 @@ function updateReindexStatus(payload) {
     return;
   }
   const finishedAt = payload?.last_run_finished_at || initialState.lastRunFinishedAt;
-  reindexStatus.textContent = finishedAt ? `Last reindex: ${finishedAt}` : "Ready to reindex";
+  const duration = payload?.last_run_duration_seconds || initialState.lastRunDurationSeconds;
+  reindexStatus.textContent = finishedAt
+    ? `Last reindex: ${finishedAt}${duration ? ` (${duration.toFixed(1)}s)` : ""}`
+    : "Ready to reindex";
   reindexButton.disabled = false;
+}
+
+function readConfig() {
+  const sources = {};
+  configForm?.querySelectorAll("[data-source-name]").forEach((card) => {
+    const sourceName = card.dataset.sourceName;
+    const config = {};
+    card.querySelectorAll("input[name]").forEach((input) => {
+      const [_, key] = input.name.split(".");
+      config[key] = input.type === "number" ? Number(input.value) : input.value;
+    });
+    sources[sourceName] = config;
+  });
+  return sources;
+}
+
+async function saveConfig(event) {
+  event.preventDefault();
+  if (!configForm || !configStatus) return;
+  configStatus.textContent = "Saving...";
+  try {
+    const response = await fetch("/api/index-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources: readConfig() }),
+    });
+    if (!response.ok) throw new Error("Save failed");
+    configStatus.textContent = "Saved. Reindex to apply.";
+  } catch (error) {
+    configStatus.textContent = "Could not save settings.";
+  }
 }
 
 function updateTimeLeft() {
@@ -228,7 +265,8 @@ function renderResults(results, query) {
     return;
   }
   resultsList.innerHTML = results.map((result) => productResultCard(result)).join("");
-  updateTimeLeft();
+updateTimeLeft();
+configForm?.addEventListener("submit", saveConfig);
 }
 
 function setLoading(loading) {

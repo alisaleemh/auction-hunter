@@ -147,6 +147,7 @@ def test_metadata_reflects_last_run(tmp_path):
     assert metadata.indexed_source_count == 1
     assert metadata.indexed_auction_count == 2
     assert metadata.indexed_lot_count == 5
+    assert metadata.last_run_duration_seconds == 600.0
 
 
 def test_format_time_left():

@@ -162,6 +162,25 @@ def test_api_status_reports_indexing_state(tmp_path, monkeypatch):
     assert payload["indexing"] is False
 
 
+def test_api_index_config_round_trip(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+
+    response = client.post(
+        "/api/index-config",
+        json={"sources": {"HiBid": {"zip_code": "90210", "miles": 50}}},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "ok"
+
+    config = client.get("/api/index-config").get_json()
+    hibid = next(source for source in config["sources"] if source["name"] == "HiBid")
+    assert hibid["config"]["zip_code"] == "90210"
+    assert hibid["config"]["miles"] == 50
+
+
 def test_api_reindex_starts_and_reports_running(tmp_path, monkeypatch):
     test_store = AuctionStore(tmp_path / "index.sqlite3")
     monkeypatch.setattr(auction_app, "store", test_store)
