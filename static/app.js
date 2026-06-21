@@ -232,12 +232,14 @@ function updateProgress(payload) {
     (total > 0 ? (done / total) * 100 : 0);
   const percent = Number.isFinite(Number(rawPercent)) ? Math.max(0, Math.min(100, Number(rawPercent))) : 0;
   const message = payload?.progress_message || initialState.progressMessage || "";
-  const label = message || (indexing ? "Indexing..." : "Idle");
+  const indeterminate = indexing && !message && total <= 0 && done <= 0 && percent <= 0;
+  const label = message || (indeterminate ? "Indexing..." : indexing ? "Indexing..." : "Idle");
 
   progressShell.hidden = !indexing && percent <= 0 && !message;
-  progressFill.style.width = `${percent}%`;
+  progressShell.classList.toggle("indeterminate", indeterminate);
+  progressFill.style.width = indeterminate ? "100%" : `${percent}%`;
   progressLabel.textContent = total > 0 ? `${label} (${done}/${total})` : label;
-  progressPercent.textContent = `${percent.toFixed(0)}%`;
+  progressPercent.textContent = indeterminate ? "..." : `${percent.toFixed(0)}%`;
   progressFill.parentElement?.setAttribute("aria-valuenow", String(Math.round(percent)));
 }
 
