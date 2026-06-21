@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS index_runs (
     started_at TEXT NOT NULL,
     finished_at TEXT,
     scope TEXT NOT NULL,
+    progress_total INTEGER,
+    progress_done INTEGER,
+    progress_percent REAL,
+    progress_message TEXT,
     source_stats_json TEXT,
     success_summary TEXT,
     error_text TEXT
@@ -97,6 +101,10 @@ class SearchMetadata:
     last_run_finished_at: str | None
     last_run_summary: str | None
     last_run_duration_seconds: float | None
+    progress_total: int | None
+    progress_done: int | None
+    progress_percent: float | None
+    progress_message: str | None
     indexed_source_count: int | None
     indexed_auction_count: int | None
     indexed_lot_count: int | None
@@ -258,10 +266,29 @@ class AuctionStore:
     def start_index_run(self, scope: str, started_at: str) -> int:
         with self.connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO index_runs (started_at, scope) VALUES (?, ?)",
-                (started_at, scope),
+                "INSERT INTO index_runs (started_at, scope, progress_total, progress_done, progress_percent, progress_message) VALUES (?, ?, ?, ?, ?, ?)",
+                (started_at, scope, None, None, None, None),
             )
             return int(cursor.lastrowid)
+
+    def update_index_run_progress(
+        self,
+        run_id: int,
+        *,
+        progress_total: int | None,
+        progress_done: int | None,
+        progress_percent: float | None,
+        progress_message: str | None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE index_runs
+                SET progress_total = ?, progress_done = ?, progress_percent = ?, progress_message = ?
+                WHERE id = ?
+                """,
+                (progress_total, progress_done, progress_percent, progress_message, run_id),
+            )
 
     def finish_index_run(
         self,
@@ -597,7 +624,7 @@ class AuctionStore:
         with self.connect() as conn:
             last_success = conn.execute(
                 """
-                SELECT finished_at, success_summary, source_stats_json
+                SELECT finished_at, success_summary, source_stats_json, progress_total, progress_done, progress_percent, progress_message
                 FROM index_runs
                 WHERE error_text IS NULL OR error_text = ''
                 ORDER BY id DESC
@@ -607,7 +634,8 @@ class AuctionStore:
             latest_lot_indexed = conn.execute("SELECT MAX(indexed_at) AS indexed_at FROM lots").fetchone()
             last_run = conn.execute(
                 """
-                SELECT started_at, scope, finished_at, success_summary, error_text
+                SELECT started_at, scope, finished_at, success_summary, error_text,
+                       progress_total, progress_done, progress_percent, progress_message
                 FROM index_runs
                 ORDER BY id DESC
                 LIMIT 1
@@ -637,6 +665,10 @@ class AuctionStore:
                 if last_run and last_run["finished_at"] and parse_iso(last_run["started_at"]) and parse_iso(last_run["finished_at"])
                 else None
             ),
+            progress_total=last_run["progress_total"] if last_run else None,
+            progress_done=last_run["progress_done"] if last_run else None,
+            progress_percent=last_run["progress_percent"] if last_run else None,
+            progress_message=last_run["progress_message"] if last_run else None,
             indexed_source_count=indexed_source_count,
             indexed_auction_count=indexed_auction_count,
             indexed_lot_count=indexed_lot_count,

@@ -32,6 +32,15 @@
           {% endif %}
           <button type="button" class="pill action-pill" id="reindex-button">Reindex now</button>
           <span class="pill subtle reindex-status" id="reindex-status" aria-live="polite">Checking reindex status...</span>
+          <div class="progress-shell" id="index-progress-shell" aria-live="polite">
+            <div class="progress-track" role="progressbar" aria-label="Index progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="progress-fill" id="index-progress-fill"></div>
+            </div>
+            <div class="progress-meta">
+              <span class="progress-label" id="index-progress-label">Waiting for progress</span>
+              <span class="progress-percent" id="index-progress-percent">0%</span>
+            </div>
+          </div>
           {% if metadata.indexed_lot_count is not none %}
             <span class="pill subtle">
               Indexed {{ metadata.indexed_lot_count }} lots{% if metadata.indexed_auction_count is not none %} across {{ metadata.indexed_auction_count }} auctions{% endif %}{% if metadata.indexed_source_count is not none %} from {{ metadata.indexed_source_count }} sources{% endif %}
@@ -151,6 +160,10 @@
       data-last-run-finished-at="{{ metadata.last_run_finished_at or '' }}"
       data-last-run-summary="{{ metadata.last_run_summary or '' }}"
       data-last-run-duration-seconds="{{ metadata.last_run_duration_seconds or '' }}"
+      data-progress-total="{{ metadata.progress_total or '' }}"
+      data-progress-done="{{ metadata.progress_done or '' }}"
+      data-progress-percent="{{ metadata.progress_percent or '' }}"
+      data-progress-message="{{ metadata.progress_message or '' }}"
     ></div>
     <script>
       window.__INITIAL_RESULTS__ = {{ results|tojson }};
