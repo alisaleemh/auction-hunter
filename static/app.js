@@ -14,6 +14,10 @@ const resultStatus = document.getElementById("result-status");
 const indexStatus = document.getElementById("index-status");
 const reindexButton = document.getElementById("reindex-button");
 const reindexStatus = document.getElementById("reindex-status");
+const progressShell = document.getElementById("index-progress-shell");
+const progressFill = document.getElementById("index-progress-fill");
+const progressLabel = document.getElementById("index-progress-label");
+const progressPercent = document.getElementById("index-progress-percent");
 const configForm = document.getElementById("index-config-form");
 const configStatus = document.getElementById("config-status");
 
@@ -30,6 +34,10 @@ const initialState = {
   lastRunFinishedAt: stateNode?.dataset.lastRunFinishedAt || "",
   lastRunSummary: stateNode?.dataset.lastRunSummary || "",
   lastRunDurationSeconds: Number(stateNode?.dataset.lastRunDurationSeconds || 0),
+  progressTotal: Number(stateNode?.dataset.progressTotal || 0),
+  progressDone: Number(stateNode?.dataset.progressDone || 0),
+  progressPercent: Number(stateNode?.dataset.progressPercent || 0),
+  progressMessage: stateNode?.dataset.progressMessage || "",
   indexing: stateNode?.dataset.indexing === "true",
   currentRunStartedAt: stateNode?.dataset.currentRunStartedAt || "",
   currentRunScope: stateNode?.dataset.currentRunScope || "",
@@ -212,6 +220,27 @@ function updateReindexStatus(payload) {
   reindexButton.disabled = false;
 }
 
+function updateProgress(payload) {
+  if (!progressShell || !progressFill || !progressLabel || !progressPercent) return;
+
+  const indexing = payload?.indexing ?? initialState.indexing;
+  const total = Number(payload?.progress_total ?? initialState.progressTotal ?? 0);
+  const done = Number(payload?.progress_done ?? initialState.progressDone ?? 0);
+  const rawPercent =
+    payload?.progress_percent ??
+    initialState.progressPercent ??
+    (total > 0 ? (done / total) * 100 : 0);
+  const percent = Number.isFinite(Number(rawPercent)) ? Math.max(0, Math.min(100, Number(rawPercent))) : 0;
+  const message = payload?.progress_message || initialState.progressMessage || "";
+  const label = message || (indexing ? "Indexing..." : "Idle");
+
+  progressShell.hidden = !indexing && percent <= 0 && !message;
+  progressFill.style.width = `${percent}%`;
+  progressLabel.textContent = total > 0 ? `${label} (${done}/${total})` : label;
+  progressPercent.textContent = `${percent.toFixed(0)}%`;
+  progressFill.parentElement?.setAttribute("aria-valuenow", String(Math.round(percent)));
+}
+
 function readConfig() {
   const sources = {};
   configForm?.querySelectorAll("[data-source-name]").forEach((card) => {
@@ -258,6 +287,7 @@ function updateTimeLeft() {
   });
   updateIndexStatus();
   updateReindexStatus();
+  updateProgress();
 }
 
 function renderResults(results, query) {
@@ -344,15 +374,18 @@ async function triggerReindex() {
       throw new Error(`Reindex failed (${response.status})`);
     }
     updateReindexStatus(payload);
+    updateProgress(payload);
     if (response.status === 202 || payload?.status === "started") {
       const poll = window.setInterval(async () => {
         try {
           const statusResponse = await fetch("/api/status");
           const statusPayload = await statusResponse.json();
           updateReindexStatus(statusPayload);
+          updateProgress(statusPayload);
           if (!statusPayload.indexing) {
             window.clearInterval(poll);
             updateReindexStatus(statusPayload);
+            updateProgress(statusPayload);
           }
         } catch (error) {
           window.clearInterval(poll);
@@ -372,6 +405,7 @@ function initialize() {
   updateIndexStatus();
   updateTimeLeft();
   updateReindexStatus();
+  updateProgress();
   renderResults(initialState.results || [], initialState.query);
   updateSummary(initialState.query, initialState.total || initialState.results.length || 0);
 
