@@ -1,6 +1,6 @@
 # Auction Hunter
 
-A local Flask app that searches a local SQLite index of current and open lots from `hibid.com` and `403auction.com`.
+A local Flask app that searches a local SQLite index of current and open lots from `hibid.com`, `403auction.com`, and `kotnauction.com`.
 
 ## Features
 

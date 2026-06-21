@@ -177,8 +177,10 @@ def test_api_index_config_round_trip(tmp_path, monkeypatch):
 
     config = client.get("/api/index-config").get_json()
     hibid = next(source for source in config["sources"] if source["name"] == "HiBid")
+    kotn = next(source for source in config["sources"] if source["name"] == "King of the North Auction")
     assert hibid["config"]["zip_code"] == "90210"
     assert hibid["config"]["miles"] == 50
+    assert kotn["fields"] == []
 
 
 def test_api_reindex_starts_and_reports_running(tmp_path, monkeypatch):

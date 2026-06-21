@@ -58,6 +58,13 @@ def source_config_payload() -> list[dict]:
             "fields": [],
             "config": sources.get("403 Auction", {}).get("config", {}),
         },
+        {
+            "name": "King of the North Auction",
+            "label": "King of the North Auction",
+            "enabled": True,
+            "fields": [],
+            "config": sources.get("King of the North Auction", {}).get("config", {}),
+        },
     ]
 
 
