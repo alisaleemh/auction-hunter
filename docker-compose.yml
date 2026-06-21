@@ -10,7 +10,7 @@ services:
     ports:
       - "5001:5001"
     volumes:
-      - auction-data:/app/data
+      - /srv/auction-hunter/data:/app/data
 
   indexer:
     build: .
@@ -25,7 +25,4 @@ services:
       DEPLOY_COMMIT: ${DEPLOY_COMMIT:-}
       INDEX_INTERVAL: ${AUCTION_INDEX_INTERVAL:-21600}
     volumes:
-      - auction-data:/app/data
-
-volumes:
-  auction-data:
+      - /srv/auction-hunter/data:/app/data

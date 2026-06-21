@@ -4,6 +4,8 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+mkdir -p /srv/auction-hunter/data
+
 if [[ ! -f .env ]]; then
   echo "missing required local file: .env" >&2
   exit 1
