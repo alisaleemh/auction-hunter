@@ -30,9 +30,10 @@
               Last run took {{ "%.0f"|format((metadata.last_run_duration_seconds / 60) if metadata.last_run_duration_seconds < 3600 else (metadata.last_run_duration_seconds / 3600)) }}{{ "m" if metadata.last_run_duration_seconds < 3600 else "h" }}
             </span>
           {% endif %}
-          {% if metadata.last_success_duration_seconds is not none %}
+          {% set last_success_duration = metadata.last_success_duration_seconds if metadata.last_success_duration_seconds is defined else none %}
+          {% if last_success_duration is not none %}
             <span class="pill subtle">
-              Last successful index took {{ "%.0f"|format((metadata.last_success_duration_seconds / 60) if metadata.last_success_duration_seconds < 3600 else (metadata.last_success_duration_seconds / 3600)) }}{{ "m" if metadata.last_success_duration_seconds < 3600 else "h" }}
+              Last successful index took {{ "%.0f"|format((last_success_duration / 60) if last_success_duration < 3600 else (last_success_duration / 3600)) }}{{ "m" if last_success_duration < 3600 else "h" }}
             </span>
           {% endif %}
           <button type="button" class="pill action-pill" id="reindex-button">Reindex now</button>

@@ -61,7 +61,13 @@ def run_index(
     source_stats: dict[str, dict] = {}
     successful_sources: list[str] = []
     errors: list[str] = []
-    store.update_index_run_progress(run_id, progress_total=len(loaders), progress_done=0, progress_percent=0.0, progress_message="Starting index")
+    store.update_index_run_progress(
+        run_id,
+        progress_total=len(loaders),
+        progress_done=0,
+        progress_percent=None,
+        progress_message=f"Fetching {len(loaders)} sources",
+    )
 
     with ThreadPoolExecutor(max_workers=len(loaders)) as executor:
         future_map = {executor.submit(loader): name for name, loader in loaders.items()}
@@ -82,11 +88,12 @@ def run_index(
                 source_stats[source_name] = {"status": "error", "error": error_text}
                 errors.append(f"{source_name}: {error_text}")
             completed += 1
+            progress_percent = round((completed / len(loaders)) * 100, 1)
             store.update_index_run_progress(
                 run_id,
                 progress_total=len(loaders),
                 progress_done=completed,
-                progress_percent=round((completed / len(loaders)) * 100, 1),
+                progress_percent=progress_percent,
                 progress_message=f"Indexed {completed}/{len(loaders)} sources",
             )
 
