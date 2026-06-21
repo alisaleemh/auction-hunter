@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+import threading
 from typing import Callable
 
 from models import ProviderSnapshot, make_lot_record
@@ -61,24 +62,53 @@ def run_index(
     source_stats: dict[str, dict] = {}
     successful_sources: list[str] = []
     errors: list[str] = []
+    heartbeat_stop = threading.Event()
 
-    with ThreadPoolExecutor(max_workers=len(loaders)) as executor:
-        future_map = {executor.submit(loader): name for name, loader in loaders.items()}
-        for future in as_completed(future_map):
-            source_name = future_map[future]
-            store.upsert_source_status(source_name, "running", started_at, None, None)
-            try:
-                snapshot = _filter_snapshot(future.result(), current)
-                stats = store.upsert_snapshot(source_name, run_id, started_at, snapshot.auctions, snapshot.lots)
-                store.prune_source_rows(source_name, run_id, to_iso(_window_end(current)))
-                store.upsert_source_status(source_name, "success", started_at, started_at, None)
-                successful_sources.append(source_name)
-                source_stats[source_name] = {"status": "success", **stats}
-            except Exception as exc:
-                error_text = str(exc)
-                store.upsert_source_status(source_name, "error", started_at, started_at, error_text)
-                source_stats[source_name] = {"status": "error", "error": error_text}
-                errors.append(f"{source_name}: {error_text}")
+    def heartbeat_loop() -> None:
+        while not heartbeat_stop.wait(15):
+            store.refresh_index_run_heartbeat(run_id)
+
+    heartbeat_thread = threading.Thread(target=heartbeat_loop, name="auction-index-heartbeat", daemon=True)
+    heartbeat_thread.start()
+    store.update_index_run_progress(run_id, progress_total=len(loaders), progress_done=0, progress_percent=0.0, progress_message="Starting index")
+
+    try:
+        with ThreadPoolExecutor(max_workers=len(loaders)) as executor:
+            future_map = {executor.submit(loader): name for name, loader in loaders.items()}
+            completed = 0
+            for future in as_completed(future_map):
+                source_name = future_map[future]
+                store.upsert_source_status(source_name, "running", started_at, None, None)
+                try:
+                    store.update_index_run_progress(
+                        run_id,
+                        progress_total=len(loaders),
+                        progress_done=completed,
+                        progress_percent=round((completed / len(loaders)) * 100, 1) if len(loaders) else 0.0,
+                        progress_message=f"Fetching {source_name}",
+                    )
+                    snapshot = _filter_snapshot(future.result(), current)
+                    stats = store.upsert_snapshot(source_name, run_id, started_at, snapshot.auctions, snapshot.lots)
+                    store.prune_source_rows(source_name, run_id, to_iso(_window_end(current)))
+                    store.upsert_source_status(source_name, "success", started_at, started_at, None)
+                    successful_sources.append(source_name)
+                    source_stats[source_name] = {"status": "success", **stats}
+                except Exception as exc:
+                    error_text = str(exc)
+                    store.upsert_source_status(source_name, "error", started_at, started_at, error_text)
+                    source_stats[source_name] = {"status": "error", "error": error_text}
+                    errors.append(f"{source_name}: {error_text}")
+                completed += 1
+                store.update_index_run_progress(
+                    run_id,
+                    progress_total=len(loaders),
+                    progress_done=completed,
+                    progress_percent=round((completed / len(loaders)) * 100, 1) if len(loaders) else 100.0,
+                    progress_message=f"Indexed {completed}/{len(loaders)} sources",
+                )
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=1)
 
     finished_at = to_iso(utc_now())
     success_count = sum(1 for stats in source_stats.values() if stats["status"] == "success")

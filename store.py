@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS index_runs (
     started_at TEXT NOT NULL,
     finished_at TEXT,
     scope TEXT NOT NULL,
+    heartbeat_at TEXT,
+    progress_total INTEGER,
+    progress_done INTEGER,
+    progress_percent REAL,
+    progress_message TEXT,
     source_stats_json TEXT,
     success_summary TEXT,
     error_text TEXT
@@ -97,12 +102,18 @@ class SearchMetadata:
     last_run_finished_at: str | None
     last_run_summary: str | None
     last_run_duration_seconds: float | None
+    progress_total: int | None
+    progress_done: int | None
+    progress_percent: float | None
+    progress_message: str | None
+    index_heartbeat_at: str | None
     indexed_source_count: int | None
     indexed_auction_count: int | None
     indexed_lot_count: int | None
     indexing: bool = False
     current_run_started_at: str | None = None
     current_run_scope: str | None = None
+    index_stale: bool = False
 
 
 def utc_now() -> datetime:
@@ -254,6 +265,7 @@ class AuctionStore:
 
         index_run_columns = {row["name"] for row in conn.execute("PRAGMA table_info(index_runs)").fetchall()}
         for column, ddl_type in (
+            ("heartbeat_at", "TEXT"),
             ("progress_total", "INTEGER"),
             ("progress_done", "INTEGER"),
             ("progress_percent", "REAL"),
@@ -265,10 +277,41 @@ class AuctionStore:
     def start_index_run(self, scope: str, started_at: str) -> int:
         with self.connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO index_runs (started_at, scope) VALUES (?, ?)",
-                (started_at, scope),
+                """
+                INSERT INTO index_runs (
+                    started_at, scope, heartbeat_at, progress_total, progress_done, progress_percent, progress_message
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (started_at, scope, started_at, None, None, None, None),
             )
             return int(cursor.lastrowid)
+
+    def refresh_index_run_heartbeat(self, run_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE index_runs SET heartbeat_at = ? WHERE id = ?",
+                (to_iso(utc_now()), run_id),
+            )
+
+    def update_index_run_progress(
+        self,
+        run_id: int,
+        *,
+        progress_total: int | None,
+        progress_done: int | None,
+        progress_percent: float | None,
+        progress_message: str | None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE index_runs
+                SET heartbeat_at = ?, progress_total = ?, progress_done = ?, progress_percent = ?, progress_message = ?
+                WHERE id = ?
+                """,
+                (to_iso(utc_now()), progress_total, progress_done, progress_percent, progress_message, run_id),
+            )
 
     def finish_index_run(
         self,
@@ -604,7 +647,7 @@ class AuctionStore:
         with self.connect() as conn:
             last_success = conn.execute(
                 """
-                SELECT finished_at, success_summary, source_stats_json
+                SELECT finished_at, success_summary, source_stats_json, heartbeat_at, progress_total, progress_done, progress_percent, progress_message
                 FROM index_runs
                 WHERE error_text IS NULL OR error_text = ''
                 ORDER BY id DESC
@@ -614,7 +657,7 @@ class AuctionStore:
             latest_lot_indexed = conn.execute("SELECT MAX(indexed_at) AS indexed_at FROM lots").fetchone()
             last_run = conn.execute(
                 """
-                SELECT started_at, scope, finished_at, success_summary, error_text
+                SELECT started_at, scope, finished_at, success_summary, error_text, heartbeat_at, progress_total, progress_done, progress_percent, progress_message
                 FROM index_runs
                 ORDER BY id DESC
                 LIMIT 1
@@ -632,11 +675,14 @@ class AuctionStore:
         if source_stats:
             indexed_auction_count = sum(int(stats.get("auctions", 0) or 0) for stats in source_stats.values())
             indexed_lot_count = sum(int(stats.get("lots", 0) or 0) for stats in source_stats.values())
-        indexing = bool(last_run and last_run["finished_at"] is None)
+        heartbeat_dt = parse_iso(last_run["heartbeat_at"]) if last_run and last_run["heartbeat_at"] else None
+        heartbeat_age_seconds = (utc_now() - heartbeat_dt).total_seconds() if heartbeat_dt else None
+        indexing = bool(last_run and last_run["finished_at"] is None and (heartbeat_age_seconds is None or heartbeat_age_seconds <= 180))
+        stale = bool(last_run and last_run["finished_at"] is None and not indexing)
         return SearchMetadata(
             deploy_commit=None,
             indexed_at=(last_success["finished_at"] if last_success else None) or (latest_lot_indexed["indexed_at"] if latest_lot_indexed else None),
-            last_run_status=None if last_run is None else ("error" if last_run["error_text"] else "success"),
+            last_run_status=None if last_run is None else ("error" if last_run["error_text"] else ("stalled" if stale else "success")),
             last_run_finished_at=last_run["finished_at"] if last_run else None,
             last_run_summary=last_run["success_summary"] if last_run else None,
             last_run_duration_seconds=(
@@ -647,6 +693,12 @@ class AuctionStore:
             indexed_source_count=indexed_source_count,
             indexed_auction_count=indexed_auction_count,
             indexed_lot_count=indexed_lot_count,
+            progress_total=last_run["progress_total"] if last_run else None,
+            progress_done=last_run["progress_done"] if last_run else None,
+            progress_percent=last_run["progress_percent"] if last_run else None,
+            progress_message=last_run["progress_message"] if last_run else None,
+            index_heartbeat_at=last_run["heartbeat_at"] if last_run else None,
+            index_stale=stale,
             indexing=indexing,
             current_run_started_at=last_run["started_at"] if indexing and last_run else None,
             current_run_scope=last_run["scope"] if indexing and last_run else None,

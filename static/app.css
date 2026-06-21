@@ -137,6 +137,66 @@ select {
   justify-items: end;
 }
 
+.progress-shell {
+  width: min(360px, 100%);
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.progress-track {
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #eef1f5;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(17, 24, 39, 0.06);
+}
+
+.progress-shell.indeterminate .progress-fill {
+  width: 100% !important;
+  background: linear-gradient(90deg, rgba(23, 73, 77, 0.18) 0%, var(--primary) 50%, rgba(181, 111, 39, 0.18) 100%);
+  background-size: 200% 100%;
+  animation: progress-shimmer 1.1s linear infinite;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%);
+  transition: width 180ms ease;
+}
+
+.progress-meta {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.progress-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-percent {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes progress-shimmer {
+  from {
+    background-position: 0% 0%;
+  }
+  to {
+    background-position: 200% 0%;
+  }
+}
+
 .pill,
 .chip,
 .time-badge {
