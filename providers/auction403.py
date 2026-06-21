@@ -36,6 +36,15 @@ def _fetch_text(session: requests.Session, url: str) -> str:
     return response.text
 
 
+def _extract_og_image_url(html: str) -> str | None:
+    soup = BeautifulSoup(html, "html.parser")
+    for selector in ('meta[property="og:image"]', 'meta[name="twitter:image"]'):
+        tag = soup.select_one(selector)
+        if tag and tag.get("content"):
+            return tag["content"].replace("&amp;", "&")
+    return None
+
+
 def _slugify(value: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "-", value.lower())
     return value.strip("-")
@@ -151,6 +160,15 @@ def _fetch_auction_snapshot(auction_url: str) -> tuple[dict, list[dict]]:
         if not key.startswith("AuctionLot."):
             continue
         title = value.get("title") or ""
+        lot_url = lot_links.get(str(value.get("auction_lot_id"))) or urljoin(BASE_URL, f"/auctions/{auction_id}/lot/{value.get('auction_lot_id')}-{_slugify(title)}")
+        image_url = None
+        try:
+            image_url = _extract_og_image_url(_fetch_text(client, lot_url))
+        except Exception:
+            image_url = None
+        raw_payload = dict(value)
+        if image_url:
+            raw_payload["imageUrl"] = image_url
         lots.append(
             make_lot_record(
                 source="403 Auction",
@@ -165,15 +183,14 @@ def _fetch_auction_snapshot(auction_url: str) -> tuple[dict, list[dict]]:
                 shipping_available=shipping_available,
                 status="closed" if value.get("is_past_end_time") else "open",
                 end_time=value.get("end_time"),
-                url=lot_links.get(str(value.get("auction_lot_id")))
-                or urljoin(BASE_URL, f"/auctions/{auction_id}/lot/{value.get('auction_lot_id')}-{_slugify(title)}"),
-                raw_payload=value,
+                url=lot_url,
+                raw_payload=raw_payload,
             )
         )
     return auction, lots
 
 
-def fetch_snapshot() -> ProviderSnapshot:
+def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
     client = _session()
     listing_html = _fetch_text(client, AUCTIONS_URL)
     auction_urls = _current_auction_urls(listing_html)

@@ -15,7 +15,8 @@ from models import ProviderSnapshot, make_lot_record
 
 
 BASE_URL = "https://hibid.com"
-LOTS_URL = f"{BASE_URL}/lots?zip=L9T%208N6&miles=25"
+DEFAULT_ZIP = "L9T 8N6"
+DEFAULT_MILES = 25
 PAGE_LENGTH = 100
 REQUEST_TIMEOUT = 15
 MAX_PAGE_WORKERS = 8
@@ -37,6 +38,15 @@ def _fetch_text(session: requests.Session, url: str) -> str:
     response = session.get(url, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     return response.text
+
+
+def _extract_og_image_url(html: str) -> str | None:
+    soup = BeautifulSoup(html, "html.parser")
+    for selector in ('meta[property="og:image"]', 'meta[name="twitter:image"]'):
+        tag = soup.select_one(selector)
+        if tag and tag.get("content"):
+            return tag["content"].replace("&amp;", "&")
+    return None
 
 
 def _parse_state(html: str) -> dict:
@@ -150,6 +160,16 @@ def _lot_record(lot: dict, apollo_state: dict, lot_links: dict[str, str]) -> tup
     end_time = _parse_hibid_end_time(lot_state)
     if end_time is None:
         return None, auction
+    lot_url = lot_links.get(str(lot.get("id")), urljoin(BASE_URL, f"/lot/{lot.get('id')}"))
+    client = _session()
+    image_url = None
+    try:
+        image_url = _extract_og_image_url(_fetch_text(client, lot_url))
+    except Exception:
+        image_url = None
+    lot_payload = dict(lot)
+    if image_url:
+        lot_payload["imageUrl"] = image_url
     lot_record = make_lot_record(
         source="HiBid",
         provider_auction_id=auction["provider_auction_id"],
@@ -163,19 +183,24 @@ def _lot_record(lot: dict, apollo_state: dict, lot_links: dict[str, str]) -> tup
         shipping_available=bool(lot.get("shippingOffered")),
         status="open" if lot_state.get("status") == "OPEN" else "closed",
         end_time=end_time,
-        url=lot_links.get(str(lot.get("id")), urljoin(BASE_URL, f"/lot/{lot.get('id')}")),
-        raw_payload=lot,
+        url=lot_url,
+        raw_payload=lot_payload,
     )
     return lot_record, auction
 
 
-def _page_url(page_number: int) -> str:
-    return LOTS_URL if page_number <= 1 else f"{LOTS_URL}&apage={page_number}"
+def _lots_url(zip_code: str, miles: int) -> str:
+    return f"{BASE_URL}/lots?zip={requests.utils.quote(zip_code)}&miles={miles}"
 
 
-def _fetch_page(page_number: int) -> tuple[int, str]:
+def _page_url(page_number: int, zip_code: str, miles: int) -> str:
+    lots_url = _lots_url(zip_code, miles)
+    return lots_url if page_number <= 1 else f"{lots_url}&apage={page_number}"
+
+
+def _fetch_page(page_number: int, zip_code: str, miles: int) -> tuple[int, str]:
     client = _session()
-    return page_number, _fetch_text(client, _page_url(page_number))
+    return page_number, _fetch_text(client, _page_url(page_number, zip_code, miles))
 
 
 def _collect_page_snapshot(html: str, lots: list[dict], auctions: dict[str, dict], seen_lots: set[str]) -> tuple[int, int]:
@@ -197,9 +222,12 @@ def _collect_page_snapshot(html: str, lots: list[dict], auctions: dict[str, dict
     return current_page, total_pages
 
 
-def fetch_snapshot() -> ProviderSnapshot:
+def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
+    config = config or {}
+    zip_code = str(config.get("zip_code") or DEFAULT_ZIP)
+    miles = int(config.get("miles") or DEFAULT_MILES)
     client = _session()
-    first_page_html = _fetch_text(client, LOTS_URL)
+    first_page_html = _fetch_text(client, _lots_url(zip_code, miles))
     lots: list[dict] = []
     auctions: dict[str, dict] = {}
     seen_lots: set[str] = set()
@@ -209,7 +237,7 @@ def fetch_snapshot() -> ProviderSnapshot:
 
         page_numbers = list(range(2, total_pages + 1))
         with ThreadPoolExecutor(max_workers=min(MAX_PAGE_WORKERS, len(page_numbers))) as executor:
-            futures = [executor.submit(_fetch_page, page_number) for page_number in page_numbers]
+            futures = [executor.submit(_fetch_page, page_number, zip_code, miles) for page_number in page_numbers]
             for future in as_completed(futures):
                 _, html = future.result()
                 _collect_page_snapshot(html, lots, auctions, seen_lots)

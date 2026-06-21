@@ -12,6 +12,10 @@ const resultsTitle = document.getElementById("results-title");
 const resultsSubtitle = document.getElementById("results-subtitle");
 const resultStatus = document.getElementById("result-status");
 const indexStatus = document.getElementById("index-status");
+const reindexButton = document.getElementById("reindex-button");
+const reindexStatus = document.getElementById("reindex-status");
+const configForm = document.getElementById("index-config-form");
+const configStatus = document.getElementById("config-status");
 
 const initialState = {
   apiUrl: stateNode?.dataset.apiUrl || "/api/search",
@@ -24,6 +28,10 @@ const initialState = {
   lastRunStatus: stateNode?.dataset.lastRunStatus || "",
   lastRunFinishedAt: stateNode?.dataset.lastRunFinishedAt || "",
   lastRunSummary: stateNode?.dataset.lastRunSummary || "",
+  lastRunDurationSeconds: Number(stateNode?.dataset.lastRunDurationSeconds || 0),
+  indexing: stateNode?.dataset.indexing === "true",
+  currentRunStartedAt: stateNode?.dataset.currentRunStartedAt || "",
+  currentRunScope: stateNode?.dataset.currentRunScope || "",
   results: Array.isArray(window.__INITIAL_RESULTS__) ? window.__INITIAL_RESULTS__ : [],
 };
 
@@ -186,6 +194,54 @@ function updateIndexStatus() {
   }
 }
 
+function updateReindexStatus(payload) {
+  if (!reindexStatus || !reindexButton) return;
+  const indexing = payload?.indexing ?? initialState.indexing;
+  const scope = payload?.current_run_scope || initialState.currentRunScope;
+  if (indexing) {
+    reindexStatus.textContent = `Reindexing${scope ? ` (${scope})` : ""}...`;
+    reindexButton.disabled = true;
+    return;
+  }
+  const finishedAt = payload?.last_run_finished_at || initialState.lastRunFinishedAt;
+  const duration = payload?.last_run_duration_seconds || initialState.lastRunDurationSeconds;
+  reindexStatus.textContent = finishedAt
+    ? `Last reindex: ${finishedAt}${duration ? ` (${duration.toFixed(1)}s)` : ""}`
+    : "Ready to reindex";
+  reindexButton.disabled = false;
+}
+
+function readConfig() {
+  const sources = {};
+  configForm?.querySelectorAll("[data-source-name]").forEach((card) => {
+    const sourceName = card.dataset.sourceName;
+    const config = {};
+    card.querySelectorAll("input[name]").forEach((input) => {
+      const [_, key] = input.name.split(".");
+      config[key] = input.type === "number" ? Number(input.value) : input.value;
+    });
+    sources[sourceName] = config;
+  });
+  return sources;
+}
+
+async function saveConfig(event) {
+  event.preventDefault();
+  if (!configForm || !configStatus) return;
+  configStatus.textContent = "Saving...";
+  try {
+    const response = await fetch("/api/index-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources: readConfig() }),
+    });
+    if (!response.ok) throw new Error("Save failed");
+    configStatus.textContent = "Saved. Reindex to apply.";
+  } catch (error) {
+    configStatus.textContent = "Could not save settings.";
+  }
+}
+
 function updateTimeLeft() {
   document.querySelectorAll("[data-result-card]").forEach((card) => {
     const endTime = card.dataset.endTime;
@@ -200,6 +256,7 @@ function updateTimeLeft() {
     card.classList.toggle("ended", time.ended);
   });
   updateIndexStatus();
+  updateReindexStatus();
 }
 
 function renderResults(results, query) {
@@ -208,7 +265,8 @@ function renderResults(results, query) {
     return;
   }
   resultsList.innerHTML = results.map((result) => productResultCard(result)).join("");
-  updateTimeLeft();
+updateTimeLeft();
+configForm?.addEventListener("submit", saveConfig);
 }
 
 function setLoading(loading) {
@@ -274,11 +332,45 @@ async function runSearch(query, sort, offset = 0) {
   }
 }
 
+async function triggerReindex() {
+  if (!reindexButton) return;
+  reindexButton.disabled = true;
+  if (reindexStatus) reindexStatus.textContent = "Starting reindex...";
+  try {
+    const response = await fetch("/api/reindex", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok && response.status !== 409) {
+      throw new Error(`Reindex failed (${response.status})`);
+    }
+    updateReindexStatus(payload);
+    if (response.status === 202 || payload?.status === "started") {
+      const poll = window.setInterval(async () => {
+        try {
+          const statusResponse = await fetch("/api/status");
+          const statusPayload = await statusResponse.json();
+          updateReindexStatus(statusPayload);
+          if (!statusPayload.indexing) {
+            window.clearInterval(poll);
+            updateReindexStatus(statusPayload);
+          }
+        } catch (error) {
+          window.clearInterval(poll);
+          if (reindexStatus) reindexStatus.textContent = "Reindex status unavailable";
+        }
+      }, 2000);
+    }
+  } catch (error) {
+    if (reindexStatus) reindexStatus.textContent = error instanceof Error ? error.message : "Reindex failed";
+    reindexButton.disabled = false;
+  }
+}
+
 function initialize() {
   queryInput.value = initialState.query;
   sortSelect.value = initialState.sort || "ending_soonest";
   updateIndexStatus();
   updateTimeLeft();
+  updateReindexStatus();
   renderResults(initialState.results || [], initialState.query);
   updateSummary(initialState.query, initialState.total || initialState.results.length || 0);
 
@@ -295,6 +387,10 @@ function initialize() {
     queryInput.value = "";
     queryInput.focus();
     void runSearch("", sortSelect.value, 0);
+  });
+
+  reindexButton?.addEventListener("click", () => {
+    void triggerReindex();
   });
 
   window.setInterval(updateTimeLeft, TIMELEFT_UPDATE_MS);

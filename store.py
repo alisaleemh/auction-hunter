@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     enabled INTEGER NOT NULL DEFAULT 1,
+    config_json TEXT,
     last_index_status TEXT,
     last_index_started_at TEXT,
     last_index_finished_at TEXT,
@@ -94,9 +95,13 @@ class SearchMetadata:
     last_run_status: str | None
     last_run_finished_at: str | None
     last_run_summary: str | None
+    last_run_duration_seconds: float | None
     indexed_source_count: int | None
     indexed_auction_count: int | None
     indexed_lot_count: int | None
+    indexing: bool = False
+    current_run_started_at: str | None = None
+    current_run_scope: str | None = None
 
 
 def utc_now() -> datetime:
@@ -224,10 +229,11 @@ class AuctionStore:
 
     @contextmanager
     def connect(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 30000")
             yield conn
             conn.commit()
         finally:
@@ -235,6 +241,8 @@ class AuctionStore:
 
     def initialize(self) -> None:
         with self.connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout = 30000")
             conn.executescript(SCHEMA)
 
     def start_index_run(self, scope: str, started_at: str) -> int:
@@ -274,8 +282,8 @@ class AuctionStore:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO sources (name, enabled, last_index_status, last_index_started_at, last_index_finished_at, last_error_text)
-                VALUES (?, 1, ?, ?, ?, ?)
+                INSERT INTO sources (name, enabled, config_json, last_index_status, last_index_started_at, last_index_finished_at, last_error_text)
+                VALUES (?, 1, NULL, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     enabled = 1,
                     last_index_status = excluded.last_index_status,
@@ -287,6 +295,50 @@ class AuctionStore:
             )
             row = conn.execute("SELECT id FROM sources WHERE name = ?", (source_name,)).fetchone()
             return int(row["id"])
+
+    def get_sources(self) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT name, enabled, config_json, last_index_status, last_index_started_at,
+                       last_index_finished_at, last_error_text
+                FROM sources
+                ORDER BY name
+                """
+            ).fetchall()
+        sources = []
+        for row in rows:
+            config = {}
+            if row["config_json"]:
+                try:
+                    config = json.loads(row["config_json"])
+                except json.JSONDecodeError:
+                    config = {}
+            sources.append(
+                {
+                    "name": row["name"],
+                    "enabled": bool(row["enabled"]),
+                    "config": config,
+                    "last_index_status": row["last_index_status"],
+                    "last_index_started_at": row["last_index_started_at"],
+                    "last_index_finished_at": row["last_index_finished_at"],
+                    "last_error_text": row["last_error_text"],
+                }
+            )
+        return sources
+
+    def upsert_source_config(self, source_name: str, config: dict) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sources (name, enabled, config_json)
+                VALUES (?, 1, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    config_json = excluded.config_json,
+                    enabled = 1
+                """,
+                (source_name, json.dumps(config, sort_keys=True)),
+            )
 
     def get_source_id(self, source_name: str) -> int:
         with self.connect() as conn:
@@ -545,7 +597,7 @@ class AuctionStore:
             latest_lot_indexed = conn.execute("SELECT MAX(indexed_at) AS indexed_at FROM lots").fetchone()
             last_run = conn.execute(
                 """
-                SELECT finished_at, success_summary, error_text
+                SELECT started_at, scope, finished_at, success_summary, error_text
                 FROM index_runs
                 ORDER BY id DESC
                 LIMIT 1
@@ -563,14 +615,23 @@ class AuctionStore:
         if source_stats:
             indexed_auction_count = sum(int(stats.get("auctions", 0) or 0) for stats in source_stats.values())
             indexed_lot_count = sum(int(stats.get("lots", 0) or 0) for stats in source_stats.values())
+        indexing = bool(last_run and last_run["finished_at"] is None)
         return SearchMetadata(
             indexed_at=(last_success["finished_at"] if last_success else None) or (latest_lot_indexed["indexed_at"] if latest_lot_indexed else None),
             last_run_status=None if last_run is None else ("error" if last_run["error_text"] else "success"),
             last_run_finished_at=last_run["finished_at"] if last_run else None,
             last_run_summary=last_run["success_summary"] if last_run else None,
+            last_run_duration_seconds=(
+                (parse_iso(last_run["finished_at"]) - parse_iso(last_run["started_at"])).total_seconds()
+                if last_run and last_run["finished_at"] and parse_iso(last_run["started_at"]) and parse_iso(last_run["finished_at"])
+                else None
+            ),
             indexed_source_count=indexed_source_count,
             indexed_auction_count=indexed_auction_count,
             indexed_lot_count=indexed_lot_count,
+            indexing=indexing,
+            current_run_started_at=last_run["started_at"] if indexing and last_run else None,
+            current_run_scope=last_run["scope"] if indexing and last_run else None,
         )
 
     def last_success_for_scope(self, scope: str) -> datetime | None:
