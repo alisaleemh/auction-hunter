@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from models import ProviderSnapshot, make_lot_record
-from providers import auction403, hibid
+from providers import auction403, hibid, kotn
 from store import AuctionStore, SearchMetadata, to_iso, utc_now
 
 
@@ -53,9 +53,13 @@ def run_index(
     def auction403_loader() -> ProviderSnapshot:
         return auction403.fetch_snapshot(source_configs.get("403 Auction", {}))
 
+    def kotn_loader() -> ProviderSnapshot:
+        return kotn.fetch_snapshot(source_configs.get("King of the North Auction", {}))
+
     loaders = provider_loaders or {
         "HiBid": hibid_loader,
         "403 Auction": auction403_loader,
+        "King of the North Auction": kotn_loader,
     }
 
     source_stats: dict[str, dict] = {}

@@ -15,6 +15,13 @@ from providers.hibid import (
     _parse_state,
     _root_search_refs,
 )
+from providers.kotn import (
+    _auction_location_from_html,
+    _auction_title_from_html,
+    _current_auction_urls,
+    _parse_listing_data,
+    fetch_snapshot,
+)
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -81,3 +88,37 @@ def test_403_auction_address_from_html():
 def test_distance_helper_uses_local_overrides():
     assert distance_from_l9t8n6_miles("80 Westcreek Blvd, Unit 2, Brampton, Ontario L6T0B8") is not None
     assert distance_from_l9t8n6_miles("Lake Shore Blvd E & Don Roadway Area, Toronto, Ontario M4M ***") is not None
+
+
+def test_kotn_fixture_parses_auction_urls_title_and_listing_data():
+    listing_page = (FIXTURES / "kotn_auction_page.html").read_text(encoding="utf-8")
+    all_page = (FIXTURES / "kotn_auctions_all.html").read_text(encoding="utf-8")
+
+    urls = _current_auction_urls(all_page)
+    listing_data = _parse_listing_data(listing_page)
+
+    assert urls == ["https://kotnauction.com/auctions/1051"]
+    assert _auction_title_from_html(listing_page) == "Huronia High-Value Auction"
+    assert _auction_location_from_html(listing_page) == "Huronia"
+    assert listing_data["3941850"]["bid"] == 10
+
+
+def test_kotn_fetch_snapshot_filters_out_future_lots(monkeypatch):
+    listing_page = (FIXTURES / "kotn_auction_page.html").read_text(encoding="utf-8")
+    all_page = (FIXTURES / "kotn_auctions_all.html").read_text(encoding="utf-8")
+
+    def fake_fetch_text(session, url):
+        if url.endswith("/auctions/all"):
+            return all_page
+        if url.startswith("https://kotnauction.com/auctions/1051"):
+            return listing_page
+        raise AssertionError(url)
+
+    monkeypatch.setattr("providers.kotn._fetch_text", fake_fetch_text)
+
+    snapshot = fetch_snapshot({"now": "2026-06-18T00:00:00+00:00"})
+    assert snapshot.source == "King of the North Auction"
+    assert [auction["provider_auction_id"] for auction in snapshot.auctions] == ["1051"]
+    assert [lot["provider_lot_id"] for lot in snapshot.lots] == ["3941850"]
+    assert snapshot.lots[0]["current_bid"] == 10
+    assert snapshot.lots[0]["raw_payload"]["imageUrl"] == "https://example.com/image.jpg"
