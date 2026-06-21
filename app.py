@@ -49,6 +49,8 @@ def metadata_payload() -> dict:
         "progress_done": metadata.progress_done,
         "progress_percent": metadata.progress_percent,
         "progress_message": metadata.progress_message,
+        "index_heartbeat_at": metadata.index_heartbeat_at,
+        "index_stale": metadata.index_stale,
     }
 
 
