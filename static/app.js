@@ -226,13 +226,13 @@ function updateProgress(payload) {
   const indexing = payload?.indexing ?? initialState.indexing;
   const total = Number(payload?.progress_total ?? initialState.progressTotal ?? 0);
   const done = Number(payload?.progress_done ?? initialState.progressDone ?? 0);
-  const rawPercent =
-    payload?.progress_percent ??
-    initialState.progressPercent ??
-    (total > 0 ? (done / total) * 100 : 0);
-  const percent = Number.isFinite(Number(rawPercent)) ? Math.max(0, Math.min(100, Number(rawPercent))) : 0;
+  const rawPercent = payload?.progress_percent ?? initialState.progressPercent;
+  const computedPercent = total > 0 ? (done / total) * 100 : 0;
+  const percent = Number.isFinite(Number(rawPercent))
+    ? Math.max(0, Math.min(100, Number(rawPercent)))
+    : computedPercent;
   const message = payload?.progress_message || initialState.progressMessage || "";
-  const indeterminate = indexing && !message && total <= 0 && done <= 0 && percent <= 0;
+  const indeterminate = indexing && (rawPercent == null || (done <= 0 && percent <= 0));
   const label = message || (indeterminate ? "Indexing..." : indexing ? "Indexing..." : "Idle");
 
   progressShell.hidden = !indexing && percent <= 0 && !message;
@@ -240,7 +240,7 @@ function updateProgress(payload) {
   progressFill.style.width = indeterminate ? "100%" : `${percent}%`;
   progressLabel.textContent = total > 0 ? `${label} (${done}/${total})` : label;
   progressPercent.textContent = indeterminate ? "..." : `${percent.toFixed(0)}%`;
-  progressFill.parentElement?.setAttribute("aria-valuenow", String(Math.round(percent)));
+  progressFill.parentElement?.setAttribute("aria-valuenow", indeterminate ? "0" : String(Math.round(percent)));
 }
 
 function readConfig() {

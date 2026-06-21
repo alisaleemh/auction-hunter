@@ -101,6 +101,7 @@ class SearchMetadata:
     last_run_finished_at: str | None
     last_run_summary: str | None
     last_run_duration_seconds: float | None
+    last_success_duration_seconds: float | None
     progress_total: int | None
     progress_done: int | None
     progress_percent: float | None
@@ -631,7 +632,7 @@ class AuctionStore:
         with self.connect() as conn:
             last_success = conn.execute(
                 """
-                SELECT finished_at, success_summary, source_stats_json, progress_total, progress_done, progress_percent, progress_message
+                SELECT started_at, finished_at, success_summary, source_stats_json, progress_total, progress_done, progress_percent, progress_message
                 FROM index_runs
                 WHERE error_text IS NULL OR error_text = ''
                 ORDER BY id DESC
@@ -670,6 +671,11 @@ class AuctionStore:
             last_run_duration_seconds=(
                 (parse_iso(last_run["finished_at"]) - parse_iso(last_run["started_at"])).total_seconds()
                 if last_run and last_run["finished_at"] and parse_iso(last_run["started_at"]) and parse_iso(last_run["finished_at"])
+                else None
+            ),
+            last_success_duration_seconds=(
+                (parse_iso(last_success["finished_at"]) - parse_iso(last_success["started_at"])).total_seconds()
+                if last_success and last_success["finished_at"] and parse_iso(last_success["started_at"]) and parse_iso(last_success["finished_at"])
                 else None
             ),
             progress_total=last_run["progress_total"] if last_run else None,
