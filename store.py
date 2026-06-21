@@ -256,12 +256,19 @@ class AuctionStore:
             self._ensure_schema_migrations(conn)
 
     def _ensure_schema_migrations(self, conn: sqlite3.Connection) -> None:
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(sources)").fetchall()
-        }
-        if "config_json" not in columns:
+        sources_columns = {row["name"] for row in conn.execute("PRAGMA table_info(sources)").fetchall()}
+        if "config_json" not in sources_columns:
             conn.execute("ALTER TABLE sources ADD COLUMN config_json TEXT")
+
+        index_run_columns = {row["name"] for row in conn.execute("PRAGMA table_info(index_runs)").fetchall()}
+        for column, ddl_type in (
+            ("progress_total", "INTEGER"),
+            ("progress_done", "INTEGER"),
+            ("progress_percent", "REAL"),
+            ("progress_message", "TEXT"),
+        ):
+            if column not in index_run_columns:
+                conn.execute(f"ALTER TABLE index_runs ADD COLUMN {column} {ddl_type}")
 
     def start_index_run(self, scope: str, started_at: str) -> int:
         with self.connect() as conn:
