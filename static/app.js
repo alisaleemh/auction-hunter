@@ -5,6 +5,8 @@ const stateNode = document.getElementById("app-state");
 const form = document.getElementById("search-form");
 const queryInput = document.getElementById("q");
 const sortSelect = document.getElementById("sort");
+const endingWithinSelect = document.getElementById("ending_within");
+const sourceInputs = Array.from(document.querySelectorAll('input[name="source"]'));
 const clearButton = document.getElementById("clear-search");
 const submitButton = document.getElementById("search-submit");
 const resultsList = document.getElementById("results-list");
@@ -28,6 +30,8 @@ const initialState = {
   limit: Number(stateNode?.dataset.limit || window.__INITIAL_LIMIT__ || 50),
   offset: Number(stateNode?.dataset.offset || 0),
   total: Number(stateNode?.dataset.total || 0),
+  sources: stateNode?.dataset.sources ? stateNode.dataset.sources.split(",").filter(Boolean) : Array.isArray(window.__INITIAL_SOURCES__) ? window.__INITIAL_SOURCES__ : [],
+  endingWithin: stateNode?.dataset.endingWithin || window.__INITIAL_ENDING_WITHIN__ || "",
   indexedAt: stateNode?.dataset.indexedAt || "",
   deployCommit: stateNode?.dataset.deployCommit || "",
   lastRunStatus: stateNode?.dataset.lastRunStatus || "",
@@ -326,6 +330,11 @@ function updateSummary(query, count) {
   resultsSubtitle.textContent = `${count} ${count === 1 ? "match" : "matches"} for "${query}"`;
 }
 
+function collectFilterState() {
+  initialState.sources = sourceInputs.filter((node) => node.checked).map((node) => node.value);
+  initialState.endingWithin = endingWithinSelect?.value || "";
+}
+
 function syncUrl(query, sort, offset = 0) {
   const url = new URL(window.location.href);
   if (query) url.searchParams.set("q", query);
@@ -335,10 +344,15 @@ function syncUrl(query, sort, offset = 0) {
   if (initialState.limit) url.searchParams.set("limit", String(initialState.limit));
   if (offset > 0) url.searchParams.set("offset", String(offset));
   else url.searchParams.delete("offset");
+  url.searchParams.delete("source");
+  initialState.sources.forEach((source) => url.searchParams.append("source", source));
+  if (initialState.endingWithin) url.searchParams.set("ending_within", String(initialState.endingWithin));
+  else url.searchParams.delete("ending_within");
   window.history.replaceState({}, "", url);
 }
 
 async function runSearch(query, sort, offset = 0) {
+  collectFilterState();
   setLoading(true);
   syncUrl(query, sort, offset);
   try {
@@ -348,6 +362,8 @@ async function runSearch(query, sort, offset = 0) {
       limit: String(initialState.limit || 50),
       offset: String(offset),
     });
+    initialState.sources.forEach((source) => params.append("source", source));
+    if (initialState.endingWithin) params.set("ending_within", String(initialState.endingWithin));
     const response = await fetch(`${initialState.apiUrl}?${params.toString()}`);
     if (!response.ok) {
       throw new Error(`Search failed (${response.status})`);
@@ -404,6 +420,10 @@ async function triggerReindex() {
 function initialize() {
   queryInput.value = initialState.query;
   sortSelect.value = initialState.sort || "ending_soonest";
+  endingWithinSelect.value = initialState.endingWithin || "";
+  sourceInputs.forEach((input) => {
+    input.checked = initialState.sources.includes(input.value);
+  });
   updateIndexStatus();
   updateTimeLeft();
   updateReindexStatus();
@@ -413,6 +433,7 @@ function initialize() {
 
   form?.addEventListener("submit", (event) => {
     event.preventDefault();
+    collectFilterState();
     void runSearch(queryInput.value.trim(), sortSelect.value, 0);
   });
 
@@ -420,9 +441,22 @@ function initialize() {
     void runSearch(queryInput.value.trim(), sortSelect.value, 0);
   });
 
+  endingWithinSelect?.addEventListener("change", () => {
+    initialState.endingWithin = endingWithinSelect.value;
+    void runSearch(queryInput.value.trim(), sortSelect.value, 0);
+  });
+
+  sourceInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      initialState.sources = sourceInputs.filter((node) => node.checked).map((node) => node.value);
+      void runSearch(queryInput.value.trim(), sortSelect.value, 0);
+    });
+  });
+
   clearButton?.addEventListener("click", () => {
     queryInput.value = "";
     queryInput.focus();
+    collectFilterState();
     void runSearch("", sortSelect.value, 0);
   });
 

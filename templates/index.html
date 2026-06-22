@@ -93,60 +93,64 @@
         </form>
       </section>
 
-      <section class="search-shell">
-        {{ search_bar(query, sort) }}
-        <p class="search-hint">Submit on Enter. Clear the query to reset.</p>
-      </section>
-
-      <section class="results-shell">
-        <div class="results-header">
-          <div>
-            <h2 id="results-title">{{ "Results" if query else "All indexed lots" }}</h2>
-            <p id="results-subtitle" class="muted">
-              {% if query %}
-                {{ results|length }} of {{ total }} matches for "{{ query }}"
-              {% else %}
-                {{ total }} indexed lots available to browse
-              {% endif %}
-            </p>
+      <div class="content-grid">
+        <aside class="sidebar-shell">
+          <div class="search-shell">
+            {{ search_bar(query, sort, sources, ending_within, available_sources, ending_window_options) }}
+            <p class="search-hint">Submit on Enter. Clear the query to reset.</p>
           </div>
-          <div id="result-status" class="status-note"></div>
-        </div>
+        </aside>
 
-        {% if errors %}
-          <section class="error-banner" role="alert">
-            <strong>Search unavailable.</strong>
-            <span>{{ errors|join("; ") }}</span>
-          </section>
-        {% endif %}
+        <section class="results-shell">
+          <div class="results-header">
+            <div>
+              <h2 id="results-title">{{ "Results" if query else "All indexed lots" }}</h2>
+              <p id="results-subtitle" class="muted">
+                {% if query %}
+                  {{ results|length }} of {{ total }} matches for "{{ query }}"
+                {% else %}
+                  {{ total }} indexed lots available to browse
+                {% endif %}
+              </p>
+            </div>
+            <div id="result-status" class="status-note"></div>
+          </div>
 
-        <div id="results-list" class="results-list">
-          {% if results %}
-            {% for result in results %}
-              {{ result_card(result) }}
-            {% endfor %}
-          {% else %}
-            {% if query %}
-              {{ empty_state("No products found.", "Try a broader search term.") }}
-            {% else %}
-              {{ empty_state("No products found.", "The index is empty.") }}
-            {% endif %}
+          {% if errors %}
+            <section class="error-banner" role="alert">
+              <strong>Search unavailable.</strong>
+              <span>{{ errors|join("; ") }}</span>
+            </section>
           {% endif %}
-        </div>
-        {% if total > limit %}
-          <div class="pagination">
-            <a class="link-button{% if offset <= 0 %} disabled{% endif %}"
-               href="{{ url_for('index', q=query, sort=sort, limit=limit, offset=(offset - limit if offset > 0 else 0)) }}"
-               aria-disabled="{{ 'true' if offset <= 0 else 'false' }}">Previous</a>
-            <span class="pagination-note">
-              Showing {{ offset + 1 }}-{{ [offset + results|length, total]|min }} of {{ total }}
-            </span>
-            <a class="link-button{% if offset + limit >= total %} disabled{% endif %}"
-               href="{{ url_for('index', q=query, sort=sort, limit=limit, offset=offset + limit) }}"
-               aria-disabled="{{ 'true' if offset + limit >= total else 'false' }}">Next</a>
+
+          <div id="results-list" class="results-list">
+            {% if results %}
+              {% for result in results %}
+                {{ result_card(result) }}
+              {% endfor %}
+            {% else %}
+              {% if query %}
+                {{ empty_state("No products found.", "Try a broader search term or relax the filters.") }}
+              {% else %}
+                {{ empty_state("No products found.", "The index is empty.") }}
+              {% endif %}
+            {% endif %}
           </div>
-        {% endif %}
-      </section>
+          {% if total > limit %}
+            <div class="pagination">
+              <a class="link-button{% if offset <= 0 %} disabled{% endif %}"
+                 href="{{ build_search_url(query=query, sort=sort, limit=limit, offset=(offset - limit if offset > 0 else 0), sources=sources, ending_within=ending_within) }}"
+                 aria-disabled="{{ 'true' if offset <= 0 else 'false' }}">Previous</a>
+              <span class="pagination-note">
+                Showing {{ offset + 1 }}-{{ [offset + results|length, total]|min }} of {{ total }}
+              </span>
+              <a class="link-button{% if offset + limit >= total %} disabled{% endif %}"
+                 href="{{ build_search_url(query=query, sort=sort, limit=limit, offset=offset + limit, sources=sources, ending_within=ending_within) }}"
+                 aria-disabled="{{ 'true' if offset + limit >= total else 'false' }}">Next</a>
+            </div>
+          {% endif %}
+        </section>
+      </div>
     </main>
 
     <div
@@ -160,6 +164,8 @@
       data-indexing="{{ 'true' if metadata.indexing else 'false' }}"
       data-current-run-started-at="{{ metadata.current_run_started_at or '' }}"
       data-current-run-scope="{{ metadata.current_run_scope or '' }}"
+      data-sources="{{ sources|join(',') }}"
+      data-ending-within="{{ ending_within or '' }}"
       data-indexed-at="{{ metadata.indexed_at or '' }}"
       data-deploy-commit="{{ deploy_commit or '' }}"
       data-last-run-status="{{ metadata.last_run_status or '' }}"
@@ -176,6 +182,8 @@
       window.__INITIAL_QUERY__ = {{ query|tojson }};
       window.__INITIAL_SORT__ = {{ sort|tojson }};
       window.__INITIAL_LIMIT__ = {{ limit|tojson }};
+      window.__INITIAL_SOURCES__ = {{ sources|tojson }};
+      window.__INITIAL_ENDING_WITHIN__ = {{ ending_within|tojson }};
     </script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>

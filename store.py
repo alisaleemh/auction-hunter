@@ -535,12 +535,15 @@ class AuctionStore:
         query: str,
         now: datetime | None = None,
         sort_by: str = "relevance",
+        sources: Iterable[str] | None = None,
+        ending_within_hours: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
         current = now or utc_now()
         now_iso = to_iso(current)
-        window_end = to_iso(current + timedelta(days=7))
+        max_hours = 24 * 7 if ending_within_hours is None else max(1, int(ending_within_hours))
+        window_end = to_iso(current + timedelta(hours=max_hours))
         token_groups = expanded_query_tokens(query)
         limit = max(1, min(int(limit or 50), 100))
         offset = max(0, int(offset or 0))
@@ -569,6 +572,10 @@ class AuctionStore:
               AND l.end_time <= ?
         """
         params: list[object] = [now_iso, window_end]
+        source_filters = [source.strip() for source in (sources or []) if source and source.strip()]
+        if source_filters:
+            sql += " AND s.name IN (" + ", ".join("?" for _ in source_filters) + ")"
+            params.extend(source_filters)
         for token_group in token_groups:
             sql += " AND (" + " OR ".join("l.searchable_text LIKE ?" for _ in token_group) + ")"
             params.extend(f"%{token}%" for token in token_group)

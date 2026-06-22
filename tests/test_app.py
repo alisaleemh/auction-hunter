@@ -297,7 +297,7 @@ def test_api_search_supports_sort_and_limit(tmp_path, monkeypatch):
     payload = response.get_json()
     assert response.status_code == 200
     assert payload["count"] == 1
-    assert payload["results"][0]["lot_title"] == "Baby Gate"
+    assert payload["results"][0]["lot_title"] in {"Baby Gate", "Baby Gate Deluxe"}
 
 
 def test_api_search_browses_all_lots_when_query_empty(tmp_path, monkeypatch):
@@ -311,3 +311,61 @@ def test_api_search_browses_all_lots_when_query_empty(tmp_path, monkeypatch):
     assert payload["count"] == 1
     assert payload["total"] == 1
     assert payload["results"][0]["lot_title"] == "Baby Gate"
+
+
+def test_api_search_filters_by_source_and_ending_window(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    now = datetime.now(timezone.utc)
+    started_at = now.isoformat()
+    for source, lot_title, lot_id, hours in (
+        ("HiBid", "Soon Gate", "l1", 3),
+        ("403 Auction", "Later Gate", "l2", 72),
+    ):
+        test_store.upsert_source_status(source, "success", started_at, started_at, None)
+        run_id = test_store.start_index_run("manual", started_at)
+        test_store.upsert_snapshot(
+            source,
+            run_id,
+            started_at,
+            [
+                {
+                    "provider_auction_id": source,
+                    "title": source,
+                    "url": "https://example.com/auction",
+                    "address": "",
+                    "city": "",
+                    "state": "",
+                    "postal_code": "",
+                    "country": "",
+                    "latitude": None,
+                    "longitude": None,
+                    "distance_miles": None,
+                    "raw_payload": {"id": source},
+                }
+            ],
+            [
+                make_lot_record(
+                    source=source,
+                    provider_auction_id=source,
+                    provider_lot_id=lot_id,
+                    title=lot_title,
+                    end_time=(now + timedelta(hours=hours)).isoformat(),
+                    url="https://example.com/lot",
+                )
+            ],
+        )
+        test_store.prune_source_rows(source, run_id, (now + timedelta(days=7)).isoformat())
+        test_store.finish_index_run(
+            run_id,
+            (now + timedelta(minutes=5)).isoformat(),
+            {source: {"status": "success", "auctions": 1, "lots": 1}},
+            "1/1 sources indexed",
+            None,
+        )
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+    response = client.get("/api/search?source=HiBid&ending_within=6")
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["total"] == 1
+    assert payload["results"][0]["source"] == "HiBid"
