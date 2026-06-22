@@ -179,6 +179,92 @@ def test_query_results_filters_by_source_and_ending_window(tmp_path):
     assert results[0]["source"] == "HiBid"
 
 
+def test_fts_search_handles_title_synonyms_and_prefixes(tmp_path):
+    store = AuctionStore(tmp_path / "index.sqlite3")
+    now = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    started_at = to_iso(now)
+    store.upsert_source_status("HiBid", "success", started_at, started_at, None)
+    run_id = store.start_index_run("manual", started_at)
+    store.upsert_snapshot(
+        "HiBid",
+        run_id,
+        started_at,
+        [_auction("a1", title="Baby Auction")],
+        [
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="a1",
+                provider_lot_id="l1",
+                title="Graco Infant Car Seat",
+                description="Rear facing infant seat",
+                end_time=to_iso(now + timedelta(hours=2)),
+                url="https://example.com/lot/1",
+            ),
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="a1",
+                provider_lot_id="l2",
+                title="Baby Stair Gate",
+                description="Pressure mount gate",
+                end_time=to_iso(now + timedelta(hours=3)),
+                url="https://example.com/lot/2",
+            ),
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="a1",
+                provider_lot_id="l3",
+                title="Car Seat Cover",
+                description="Travel accessory",
+                end_time=to_iso(now + timedelta(hours=4)),
+                url="https://example.com/lot/3",
+            ),
+        ],
+    )
+    store.prune_source_rows("HiBid", run_id, to_iso(now + timedelta(days=7)))
+    store.rebuild_fts_index()
+
+    exact_results, exact_total = store.query_results("infant car seat", now=now)
+    assert exact_total >= 1
+    assert exact_results[0]["lot_title"] == "Graco Infant Car Seat"
+
+    synonym_results, synonym_total = store.query_results("baby", now=now)
+    assert synonym_total >= 1
+    assert any(row["lot_title"] == "Graco Infant Car Seat" for row in synonym_results)
+
+    prefix_results, prefix_total = store.query_results("car sea", now=now)
+    assert prefix_total >= 1
+    assert any("Car Seat" in row["lot_title"] for row in prefix_results)
+
+
+def test_rebuild_fts_index_keeps_search_working(tmp_path):
+    store = AuctionStore(tmp_path / "index.sqlite3")
+    now = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    started_at = to_iso(now)
+    store.upsert_source_status("HiBid", "success", started_at, started_at, None)
+    run_id = store.start_index_run("manual", started_at)
+    store.upsert_snapshot(
+        "HiBid",
+        run_id,
+        started_at,
+        [_auction("a1")],
+        [
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="a1",
+                provider_lot_id="l1",
+                title="Baby Gate",
+                end_time=to_iso(now + timedelta(hours=1)),
+                url="https://example.com/lot/1",
+            )
+        ],
+    )
+    store.prune_source_rows("HiBid", run_id, to_iso(now + timedelta(days=7)))
+    store.rebuild_fts_index()
+    results, total = store.query_results("gate", now=now)
+    assert total == 1
+    assert results[0]["lot_title"] == "Baby Gate"
+
+
 def test_metadata_reflects_last_run(tmp_path):
     store = AuctionStore(tmp_path / "index.sqlite3")
     run_id = store.start_index_run("manual", "2026-04-18T00:00:00+00:00")
