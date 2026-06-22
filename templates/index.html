@@ -137,14 +137,16 @@
             {% endif %}
           </div>
           {% if total > limit %}
-            <div class="pagination">
+            <div class="pagination" id="pagination-shell">
               <a class="link-button{% if offset <= 0 %} disabled{% endif %}"
+                 id="pagination-previous"
                  href="{{ build_search_url(query=query, sort=sort, limit=limit, offset=(offset - limit if offset > 0 else 0), sources=sources, ending_within=ending_within) }}"
                  aria-disabled="{{ 'true' if offset <= 0 else 'false' }}">Previous</a>
-              <span class="pagination-note">
+              <span class="pagination-note" id="pagination-note">
                 Showing {{ offset + 1 }}-{{ [offset + results|length, total]|min }} of {{ total }}
               </span>
               <a class="link-button{% if offset + limit >= total %} disabled{% endif %}"
+                 id="pagination-next"
                  href="{{ build_search_url(query=query, sort=sort, limit=limit, offset=offset + limit, sources=sources, ending_within=ending_within) }}"
                  aria-disabled="{{ 'true' if offset + limit >= total else 'false' }}">Next</a>
             </div>
