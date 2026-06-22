@@ -131,6 +131,54 @@ def test_query_results_returns_all_for_empty_query(tmp_path):
     assert len(results) == 1
 
 
+def test_query_results_filters_by_source_and_ending_window(tmp_path):
+    store = AuctionStore(tmp_path / "index.sqlite3")
+    now = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    started_at = to_iso(now)
+    store.upsert_source_status("HiBid", "success", started_at, started_at, None)
+    store.upsert_source_status("403 Auction", "success", started_at, started_at, None)
+    hibid_run = store.start_index_run("manual", started_at)
+    store.upsert_snapshot(
+        "HiBid",
+        hibid_run,
+        started_at,
+        [_auction("h1", title="HiBid Auction")],
+        [
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="h1",
+                provider_lot_id="l1",
+                title="Near Gate",
+                end_time=to_iso(now + timedelta(hours=3)),
+                url="https://example.com/lot/hibid",
+            )
+        ],
+    )
+    store.prune_source_rows("HiBid", hibid_run, to_iso(now + timedelta(days=7)))
+    auction403_run = store.start_index_run("manual", started_at)
+    store.upsert_snapshot(
+        "403 Auction",
+        auction403_run,
+        started_at,
+        [_auction("a1", title="403 Auction")],
+        [
+            make_lot_record(
+                source="403 Auction",
+                provider_auction_id="a1",
+                provider_lot_id="l2",
+                title="Far Gate",
+                end_time=to_iso(now + timedelta(days=3)),
+                url="https://example.com/lot/403",
+            )
+        ],
+    )
+    store.prune_source_rows("403 Auction", auction403_run, to_iso(now + timedelta(days=7)))
+
+    results, total = store.query_results("", now=now, sources=["HiBid"], ending_within_hours=6)
+    assert total == 1
+    assert results[0]["source"] == "HiBid"
+
+
 def test_metadata_reflects_last_run(tmp_path):
     store = AuctionStore(tmp_path / "index.sqlite3")
     run_id = store.start_index_run("manual", "2026-04-18T00:00:00+00:00")

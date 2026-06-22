@@ -1,18 +1,42 @@
-{% macro search_bar(query, sort) -%}
+{% macro search_bar(query, sort, sources, ending_within, available_sources, ending_window_options) -%}
 <form id="search-form" class="search-bar" method="get" action="/">
   <div class="search-input-wrap">
     <label class="sr-only" for="q">Search products</label>
     <input id="q" name="q" type="search" value="{{ query }}" placeholder="Search lot title, condition, details, or auction name" autocomplete="off" />
     <button class="icon-button clear-button" type="button" id="clear-search" aria-label="Clear search">Clear</button>
   </div>
-  <label class="sr-only" for="sort">Sort results</label>
-  <select id="sort" name="sort">
-    <option value="ending_soonest" {% if sort == "ending_soonest" %}selected{% endif %}>Ending soonest</option>
-    <option value="relevance" {% if sort == "relevance" %}selected{% endif %}>Relevance</option>
-    <option value="price_low_high" {% if sort == "price_low_high" %}selected{% endif %}>Price low to high</option>
-    <option value="price_high_low" {% if sort == "price_high_low" %}selected{% endif %}>Price high to low</option>
-  </select>
-  <button class="primary-button" id="search-submit" type="submit">Search</button>
+  <div class="search-actions">
+    <label class="sr-only" for="sort">Sort results</label>
+    <select id="sort" name="sort">
+      <option value="ending_soonest" {% if sort == "ending_soonest" %}selected{% endif %}>Ending soonest</option>
+      <option value="relevance" {% if sort == "relevance" %}selected{% endif %}>Relevance</option>
+      <option value="price_low_high" {% if sort == "price_low_high" %}selected{% endif %}>Price low to high</option>
+      <option value="price_high_low" {% if sort == "price_high_low" %}selected{% endif %}>Price high to low</option>
+    </select>
+    <button class="primary-button" id="search-submit" type="submit">Search</button>
+  </div>
+  <aside class="filter-panel" aria-label="Search filters">
+    <div class="filter-group">
+      <p class="filter-label">Auction sources</p>
+      <div class="filter-options">
+        {% for source in available_sources %}
+          <label class="filter-option">
+            <input type="checkbox" name="source" value="{{ source }}" {% if source in sources %}checked{% endif %}>
+            <span>{{ source }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="filter-group">
+      <label class="filter-label" for="ending_within">Ending window</label>
+      <select id="ending_within" name="ending_within">
+        <option value="" {% if not ending_within %}selected{% endif %}>Any time</option>
+        {% for value, label in ending_window_options %}
+          <option value="{{ value }}" {% if ending_within and ending_within|string == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </aside>
 </form>
 {%- endmacro %}
 

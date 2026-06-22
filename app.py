@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import time
+from urllib.parse import urlencode
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
@@ -86,6 +87,13 @@ def _manual_reindex_worker() -> None:
         run_index(store, scope="manual")
     finally:
         manual_index_lock.release()
+AVAILABLE_SOURCES = ("403 Auction", "HiBid")
+ENDING_WINDOW_OPTIONS = (
+    ("6", "Ending within 6 hours"),
+    ("24", "Ending within 24 hours"),
+    ("72", "Ending within 3 days"),
+    ("168", "Ending within 7 days"),
+)
 
 
 def _parse_limit(value: str | None, default: int = 50) -> int:
@@ -102,8 +110,63 @@ def _parse_offset(value: str | None, default: int = 0) -> int:
         return default
 
 
-def run_search(query: str, sort_by: str = "relevance", limit: int = 50, offset: int = 0) -> tuple[list[dict], int, list[str]]:
-    results, total = store.query_results(query, sort_by=sort_by, limit=limit, offset=offset)
+def _parse_sources(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+    return [value for value in values if value in AVAILABLE_SOURCES]
+
+
+def _parse_ending_within(value: str | None) -> int | None:
+    try:
+        parsed = int(value) if value else None
+    except (TypeError, ValueError):
+        return None
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
+
+
+def _build_search_url(
+    *,
+    query: str,
+    sort: str,
+    limit: int,
+    offset: int,
+    sources: list[str] | None = None,
+    ending_within: int | None = None,
+) -> str:
+    params: list[tuple[str, str]] = []
+    if query:
+        params.append(("q", query))
+    if sort:
+        params.append(("sort", sort))
+    if limit:
+        params.append(("limit", str(limit)))
+    if offset > 0:
+        params.append(("offset", str(offset)))
+    if ending_within:
+        params.append(("ending_within", str(ending_within)))
+    for source in sources or []:
+        params.append(("source", source))
+    return "/?" + urlencode(params)
+
+
+def run_search(
+    query: str,
+    sort_by: str = "relevance",
+    limit: int = 50,
+    offset: int = 0,
+    sources: list[str] | None = None,
+    ending_within_hours: int | None = None,
+) -> tuple[list[dict], int, list[str]]:
+    results, total = store.query_results(
+        query,
+        sort_by=sort_by,
+        sources=sources,
+        ending_within_hours=ending_within_hours,
+        limit=limit,
+        offset=offset,
+    )
     return results, total, []
 
 
@@ -113,7 +176,16 @@ def index():
     sort_by = request.args.get("sort", "ending_soonest").strip() or "ending_soonest"
     limit = _parse_limit(request.args.get("limit"), 50)
     offset = _parse_offset(request.args.get("offset"), 0)
-    results, total, errors = run_search(query, sort_by=sort_by, limit=limit, offset=offset)
+    selected_sources = _parse_sources(request.args.getlist("source"))
+    ending_within_hours = _parse_ending_within(request.args.get("ending_within"))
+    results, total, errors = run_search(
+        query,
+        sort_by=sort_by,
+        limit=limit,
+        offset=offset,
+        sources=selected_sources,
+        ending_within_hours=ending_within_hours,
+    )
     metadata = store.get_metadata()
     return render_template(
         "index.html",
@@ -121,6 +193,11 @@ def index():
         sort=sort_by,
         limit=limit,
         offset=offset,
+        sources=selected_sources,
+        ending_within=ending_within_hours,
+        available_sources=AVAILABLE_SOURCES,
+        ending_window_options=ENDING_WINDOW_OPTIONS,
+        build_search_url=_build_search_url,
         results=results,
         total=total,
         errors=errors,
@@ -136,7 +213,16 @@ def api_search():
     sort_by = request.args.get("sort", "relevance").strip() or "relevance"
     limit = _parse_limit(request.args.get("limit"), 50)
     offset = _parse_offset(request.args.get("offset"), 0)
-    results, total, errors = run_search(query, sort_by=sort_by, limit=limit, offset=offset)
+    selected_sources = _parse_sources(request.args.getlist("source"))
+    ending_within_hours = _parse_ending_within(request.args.get("ending_within"))
+    results, total, errors = run_search(
+        query,
+        sort_by=sort_by,
+        limit=limit,
+        offset=offset,
+        sources=selected_sources,
+        ending_within_hours=ending_within_hours,
+    )
     metadata = metadata_payload()
     return jsonify(
         {
@@ -149,6 +235,8 @@ def api_search():
             "sort": sort_by,
             "limit": limit,
             **metadata,
+            "sources": selected_sources,
+            "ending_within": ending_within_hours,
         }
     )
 
