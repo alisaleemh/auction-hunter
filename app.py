@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import logging
 import os
 import threading
 import time
@@ -15,8 +16,13 @@ from store import AuctionStore, DEFAULT_DB_PATH
 
 
 DB_PATH = Path(os.environ.get("AUCTION_SEARCH_DB", DEFAULT_DB_PATH))
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 store = AuctionStore(DB_PATH)
 app = Flask(__name__)
+app.logger.setLevel(logging.INFO)
 nightly_indexer: NightlyIndexer | None = None
 manual_index_lock = threading.Lock()
 deploy_commit = os.environ.get("DEPLOY_COMMIT", "").strip() or None
