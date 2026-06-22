@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin
@@ -28,6 +29,7 @@ HEADERS = {
 }
 LOCAL_TIMEZONE = ZoneInfo("America/Toronto")
 SOURCE_NAME = "King of the North Auction"
+logger = logging.getLogger(__name__)
 
 
 def _session() -> requests.Session:
@@ -39,6 +41,7 @@ def _session() -> requests.Session:
 def _fetch_text(session: requests.Session, url: str) -> str:
     response = session.get(url, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
+    logger.info("kotn fetch ok url=%s status=%s bytes=%s", url, response.status_code, len(response.text))
     return response.text
 
 
@@ -55,10 +58,14 @@ def _current_auction_urls(html: str) -> list[str]:
     return urls
 
 
-def _parse_listing_data(html: str) -> dict[str, dict]:
+def _parse_listing_data(html: str, *, url: str | None = None) -> dict[str, dict]:
     match = re.search(r"var\s+listingData\s*=\s*(\{.*?\});", html, re.DOTALL)
     if not match:
-        raise ValueError("King of the North page is missing listingData")
+        soup = BeautifulSoup(html, "html.parser")
+        title = " ".join((soup.title.get_text(" ", strip=True) if soup.title else "").split())
+        snippet = " ".join(html[:300].split())
+        logger.error("kotn missing listingData url=%s title=%s snippet=%s", url or "", title, snippet)
+        raise ValueError(f"King of the North page is missing listingData: {url or 'unknown url'}")
     parsed = json.loads(match.group(1))
     return {str(key): value for key, value in parsed.items()}
 
@@ -153,7 +160,7 @@ def _parse_lots_page(
     *,
     window_end: datetime,
 ) -> tuple[dict, list[dict], datetime | None, bool]:
-    listing_data = _parse_listing_data(html)
+    listing_data = _parse_listing_data(html, url=auction_url)
     soup = BeautifulSoup(html, "html.parser")
     auction = _auction_record(auction_id, auction_url, html)
     lots: list[dict] = []
@@ -234,6 +241,7 @@ def _fetch_auction_page(auction_url: str, page_number: int) -> tuple[int, str]:
 
 
 def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime, max_pages: int) -> tuple[dict, list[dict]]:
+    logger.info("kotn auction start url=%s max_pages=%s", auction_url, max_pages)
     first_page_html = _fetch_text(_session(), _auction_page_url(auction_url, 1))
     match = re.search(r"/auctions/(\d+)$", auction_url)
     if not match:
@@ -247,9 +255,11 @@ def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime, max_pages
     )
     lots_by_id = {lot["provider_lot_id"]: lot for lot in first_page_lots}
     total_pages = _max_page_number(first_page_html)
+    logger.info("kotn auction page1 url=%s auction_id=%s lots=%s total_pages=%s", auction_url, auction_id, len(first_page_lots), total_pages)
 
     if total_pages > 1 and max_pages > 1:
         page_numbers = list(range(2, min(total_pages, max_pages) + 1))
+        logger.info("kotn auction additional pages url=%s pages=%s", auction_url, page_numbers)
         with ThreadPoolExecutor(max_workers=min(MAX_PAGE_WORKERS, len(page_numbers))) as executor:
             futures = [executor.submit(_fetch_auction_page, auction_url, page_number) for page_number in page_numbers]
             for future in as_completed(futures):
@@ -263,6 +273,7 @@ def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime, max_pages
                 for lot in page_lots:
                     lots_by_id[lot["provider_lot_id"]] = lot
 
+    logger.info("kotn auction done url=%s lots=%s", auction_url, len(lots_by_id))
     return auction, list(lots_by_id.values())
 
 
@@ -270,8 +281,10 @@ def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
     current = _reference_now(config)
     window_end = current + timedelta(days=7)
     max_pages = max(1, int((config or {}).get("max_pages") or DEFAULT_MAX_PAGES_PER_AUCTION))
+    logger.info("kotn snapshot start window_end=%s max_pages=%s", window_end.isoformat(), max_pages)
     listing_html = _fetch_text(_session(), AUCTIONS_URL)
     auction_urls = _current_auction_urls(listing_html)
+    logger.info("kotn snapshot auctions=%s urls=%s", len(auction_urls), auction_urls)
     auctions: dict[str, dict] = {}
     lots: list[dict] = []
 
@@ -285,4 +298,5 @@ def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
             auctions[auction["provider_auction_id"]] = auction
             lots.extend(auction_lots)
 
+    logger.info("kotn snapshot done auctions=%s lots=%s", len(auctions), len(lots))
     return ProviderSnapshot(source=SOURCE_NAME, auctions=list(auctions.values()), lots=lots)

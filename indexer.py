@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+import logging
 from typing import Callable
 
 from models import ProviderSnapshot, make_lot_record
@@ -10,6 +11,7 @@ from store import AuctionStore, SearchMetadata, to_iso, utc_now
 
 
 WINDOW_DAYS = 7
+logger = logging.getLogger(__name__)
 
 
 def _window_end(now: datetime) -> datetime:
@@ -72,6 +74,7 @@ def run_index(
         progress_percent=None,
         progress_message=f"Fetching {len(loaders)} sources",
     )
+    logger.info("index run start run_id=%s scope=%s sources=%s", run_id, scope, list(loaders))
 
     with ThreadPoolExecutor(max_workers=len(loaders)) as executor:
         future_map = {executor.submit(loader): name for name, loader in loaders.items()}
@@ -79,6 +82,7 @@ def run_index(
         for future in as_completed(future_map):
             source_name = future_map[future]
             store.upsert_source_status(source_name, "running", started_at, None, None)
+            logger.info("index source start run_id=%s source=%s", run_id, source_name)
             try:
                 snapshot = _filter_snapshot(future.result(), current)
                 stats = store.upsert_snapshot(source_name, run_id, started_at, snapshot.auctions, snapshot.lots)
@@ -86,11 +90,19 @@ def run_index(
                 store.upsert_source_status(source_name, "success", started_at, started_at, None)
                 successful_sources.append(source_name)
                 source_stats[source_name] = {"status": "success", **stats}
+                logger.info(
+                    "index source success run_id=%s source=%s auctions=%s lots=%s",
+                    run_id,
+                    source_name,
+                    stats.get("auctions"),
+                    stats.get("lots"),
+                )
             except Exception as exc:
                 error_text = str(exc)
                 store.upsert_source_status(source_name, "error", started_at, started_at, error_text)
                 source_stats[source_name] = {"status": "error", "error": error_text}
                 errors.append(f"{source_name}: {error_text}")
+                logger.exception("index source error run_id=%s source=%s error=%s", run_id, source_name, error_text)
             completed += 1
             progress_percent = round((completed / len(loaders)) * 100, 1)
             store.update_index_run_progress(
@@ -111,4 +123,5 @@ def run_index(
         success_summary=summary,
         error_text="; ".join(errors) if errors else None,
     )
+    logger.info("index run done run_id=%s summary=%s errors=%s", run_id, summary, errors)
     return {"run_id": run_id, "summary": summary, "errors": errors, "source_stats": source_stats}
