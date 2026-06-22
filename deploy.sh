@@ -12,9 +12,11 @@ if [[ ! -f .env ]]; then
 fi
 
 git fetch origin main
-git reset --hard origin/main
 
-deploy_commit="$(git rev-parse --short HEAD)"
+git checkout -q origin/main -- . ':(exclude)data/geonames_ca_postal_codes.tsv'
+git clean -fd
+
+deploy_commit="$(git rev-parse --short origin/main)"
 export DEPLOY_COMMIT="$deploy_commit"
 
 docker compose config
