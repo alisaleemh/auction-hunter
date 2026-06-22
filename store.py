@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Iterable
 from urllib.parse import urljoin
 
-from search import expanded_query_tokens, filter_and_sort_results
+from search import TERM_EXPANSIONS, expanded_query_tokens, filter_and_sort_results, normalize_text, query_tokens
 
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "auction_index.sqlite3"
@@ -90,6 +91,15 @@ CREATE TABLE IF NOT EXISTS index_runs (
 CREATE INDEX IF NOT EXISTS idx_lots_end_time ON lots(end_time);
 CREATE INDEX IF NOT EXISTS idx_lots_source_status ON lots(source_id, status);
 CREATE INDEX IF NOT EXISTS idx_auctions_source ON auctions(source_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS lots_fts USING fts5(
+    title,
+    condition,
+    description,
+    details,
+    source,
+    tokenize='unicode61'
+);
 """
 
 
@@ -270,6 +280,21 @@ class AuctionStore:
         ):
             if column not in index_run_columns:
                 conn.execute(f"ALTER TABLE index_runs ADD COLUMN {column} {ddl_type}")
+        self._ensure_fts_schema(conn)
+
+    def _ensure_fts_schema(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS lots_fts USING fts5(
+                title,
+                condition,
+                description,
+                details,
+                source,
+                tokenize='unicode61'
+            );
+            """
+        )
 
     def start_index_run(self, scope: str, started_at: str) -> int:
         with self.connect() as conn:
@@ -503,6 +528,15 @@ class AuctionStore:
                         json.dumps(lot["raw_payload"], sort_keys=True),
                     ),
                 )
+            conn.execute("DELETE FROM lots_fts")
+            conn.execute(
+                """
+                INSERT INTO lots_fts(rowid, title, condition, description, details, source)
+                SELECT l.id, l.title, l.condition, l.description, l.details, s.name
+                FROM lots l
+                JOIN sources s ON s.id = l.source_id
+                """
+            )
 
         return {"auctions": len(auction_rows), "lots": len(lot_rows)}
 
@@ -529,6 +563,15 @@ class AuctionStore:
                 """,
                 (source_id, source_id),
             )
+            conn.execute("DELETE FROM lots_fts")
+            conn.execute(
+                """
+                INSERT INTO lots_fts(rowid, title, condition, description, details, source)
+                SELECT l.id, l.title, l.condition, l.description, l.details, s.name
+                FROM lots l
+                JOIN sources s ON s.id = l.source_id
+                """
+            )
 
     def query_results(
         self,
@@ -544,9 +587,19 @@ class AuctionStore:
         now_iso = to_iso(current)
         max_hours = 24 * 7 if ending_within_hours is None else max(1, int(ending_within_hours))
         window_end = to_iso(current + timedelta(hours=max_hours))
-        token_groups = expanded_query_tokens(query)
         limit = max(1, min(int(limit or 50), 100))
         offset = max(0, int(offset or 0))
+        token_groups = expanded_query_tokens(query)
+        source_filters = [source.strip() for source in (sources or []) if source and source.strip()]
+        candidate_ids: list[int] | None = None
+        if normalize_text(query):
+            try:
+                match_query = self._build_fts_match_query(query)
+                candidate_ids = self._fts_candidate_ids(match_query, source_filters, window_end, now_iso)
+            except Exception:
+                candidate_ids = None
+        if candidate_ids is not None and not candidate_ids:
+            candidate_ids = None
         sql = """
             SELECT
                 s.name AS source,
@@ -572,13 +625,18 @@ class AuctionStore:
               AND l.end_time <= ?
         """
         params: list[object] = [now_iso, window_end]
-        source_filters = [source.strip() for source in (sources or []) if source and source.strip()]
         if source_filters:
             sql += " AND s.name IN (" + ", ".join("?" for _ in source_filters) + ")"
             params.extend(source_filters)
-        for token_group in token_groups:
-            sql += " AND (" + " OR ".join("l.searchable_text LIKE ?" for _ in token_group) + ")"
-            params.extend(f"%{token}%" for token in token_group)
+        if candidate_ids is not None:
+            if not candidate_ids:
+                return [], 0
+            sql += " AND l.id IN (" + ", ".join("?" for _ in candidate_ids) + ")"
+            params.extend(candidate_ids)
+        else:
+            for token_group in token_groups:
+                sql += " AND (" + " OR ".join("l.searchable_text LIKE ?" for _ in token_group) + ")"
+                params.extend(f"%{token}%" for token in token_group)
         with self.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         results = []
@@ -634,6 +692,61 @@ class AuctionStore:
 
         filtered.sort(key=sort_key)
         return filtered[offset : offset + limit], total
+
+    def _build_fts_match_query(self, query: str) -> str:
+        parts = []
+        normalized = query_tokens(query)
+        if not normalized:
+            return ""
+        for token in normalized:
+            group = [token, *TERM_EXPANSIONS.get(token, [])]
+            group_parts = []
+            for candidate in group:
+                safe = re.sub(r'["*:\'()]+', " ", candidate).strip()
+                if not safe:
+                    continue
+                group_parts.append(f'{safe}*')
+                group_parts.append(f'"{safe}"')
+            if group_parts:
+                parts.append("(" + " OR ".join(group_parts) + ")")
+        phrase = normalize_text(query).replace('"', " ")
+        if len(normalized) > 1 and phrase:
+            parts.insert(0, f'"{phrase}"')
+        return " AND ".join(parts)
+
+    def _fts_candidate_ids(self, match_query: str, source_filters: list[str], window_end: str, now_iso: str) -> list[int]:
+        if not match_query:
+            return []
+        sql = """
+            SELECT l.id, bm25(lots_fts, 10.0, 3.0, 2.0, 1.0, 0.5) AS score
+            FROM lots_fts
+            JOIN lots l ON l.id = lots_fts.rowid
+            JOIN sources s ON s.id = l.source_id
+            WHERE lots_fts MATCH ?
+              AND l.status = 'open'
+              AND l.end_time >= ?
+              AND l.end_time <= ?
+        """
+        params: list[object] = [match_query, now_iso, window_end]
+        if source_filters:
+            sql += " AND s.name IN (" + ", ".join("?" for _ in source_filters) + ")"
+            params.extend(source_filters)
+        sql += " ORDER BY score LIMIT 500"
+        with self.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [int(row["id"]) for row in rows]
+
+    def rebuild_fts_index(self) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM lots_fts")
+            conn.execute(
+                """
+                INSERT INTO lots_fts(rowid, title, condition, description, details, source)
+                SELECT l.id, l.title, l.condition, l.description, l.details, s.name
+                FROM lots l
+                JOIN sources s ON s.id = l.source_id
+                """
+            )
 
     def get_metadata(self) -> SearchMetadata:
         with self.connect() as conn:

@@ -298,6 +298,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Auction search tool")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("index", help="Rebuild the local index")
+    subparsers.add_parser("rebuild-fts", help="Rebuild the SQLite FTS index")
     serve_parser = subparsers.add_parser("serve", help="Run the web app and nightly scheduler")
     serve_parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "5001")))
     args = parser.parse_args()
@@ -307,6 +308,10 @@ def main() -> None:
         print(result["summary"])
         if result["errors"]:
             print("; ".join(result["errors"]))
+        return
+    if args.command == "rebuild-fts":
+        store.rebuild_fts_index()
+        print("rebuilt FTS index")
         return
 
     port = getattr(args, "port", int(os.environ.get("PORT", "5001")))
