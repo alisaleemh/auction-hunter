@@ -1,4 +1,4 @@
-{% macro search_bar(query, sort, sources, ending_within, available_sources, ending_window_options) -%}
+{% macro search_bar(query, sort, sources, ending_within, available_sources, ending_window_options, home_postal_code, radius_km) -%}
 <form id="search-form" class="search-bar" method="get" action="/">
   <div class="search-input-wrap">
     <label class="sr-only" for="q">Search products</label>
@@ -9,6 +9,7 @@
     <label class="sr-only" for="sort">Sort results</label>
     <select id="sort" name="sort">
       <option value="ending_soonest" {% if sort == "ending_soonest" %}selected{% endif %}>Ending soonest</option>
+      <option value="proximity" {% if sort == "proximity" %}selected{% endif %}>Closest first</option>
       <option value="relevance" {% if sort == "relevance" %}selected{% endif %}>Relevance</option>
       <option value="price_low_high" {% if sort == "price_low_high" %}selected{% endif %}>Price low to high</option>
       <option value="price_high_low" {% if sort == "price_high_low" %}selected{% endif %}>Price high to low</option>
@@ -35,6 +36,14 @@
           <option value="{{ value }}" {% if ending_within and ending_within|string == value %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
+    </div>
+    <div class="filter-group">
+      <label class="filter-label" for="home_postal_code">Home postal code</label>
+      <input id="home_postal_code" name="home_postal_code" type="text" value="{{ home_postal_code or '' }}" placeholder="L9T6X9" maxlength="7">
+    </div>
+    <div class="filter-group">
+      <label class="filter-label" for="radius_km">Radius (km)</label>
+      <input id="radius_km" name="radius_km" type="number" min="1" step="1" value="{{ radius_km or '' }}" placeholder="50">
     </div>
   </aside>
 </form>
@@ -93,6 +102,9 @@
       {% endif %}
       {% if result.auctionAddress %}
         <span class="chip">{{ result.auctionAddress }}</span>
+      {% endif %}
+      {% if result.distance_km is not none %}
+        <span class="chip">{{ "%.1f"|format(result.distance_km) }} km away</span>
       {% endif %}
       {% if result.shipping_available is not none %}
         <span class="chip">{{ "Shipping" if result.shipping_available else "Pickup" }}</span>

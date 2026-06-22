@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Iterable
 from urllib.parse import urljoin
 
+from geocode import normalize_postal_code, postal_code_record, distance_between_postal_codes_km
 from search import TERM_EXPANSIONS, expanded_query_tokens, filter_and_sort_results, normalize_text, query_tokens
 
 
@@ -99,6 +100,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS lots_fts USING fts5(
     details,
     source,
     tokenize='unicode61'
+);
+
+CREATE TABLE IF NOT EXISTS postal_codes (
+    postal_code TEXT PRIMARY KEY,
+    city TEXT,
+    province TEXT,
+    latitude REAL,
+    longitude REAL
 );
 """
 
@@ -281,6 +290,7 @@ class AuctionStore:
             if column not in index_run_columns:
                 conn.execute(f"ALTER TABLE index_runs ADD COLUMN {column} {ddl_type}")
         self._ensure_fts_schema(conn)
+        self._ensure_postal_codes(conn)
 
     def _ensure_fts_schema(self, conn: sqlite3.Connection) -> None:
         conn.executescript(
@@ -294,6 +304,34 @@ class AuctionStore:
                 tokenize='unicode61'
             );
             """
+        )
+
+    def _ensure_postal_codes(self, conn: sqlite3.Connection) -> None:
+        row = conn.execute("SELECT COUNT(*) AS count FROM postal_codes").fetchone()
+        if row and int(row["count"]) > 0:
+            return
+        from geocode import POSTAL_CODES_PATH
+
+        if not POSTAL_CODES_PATH.exists():
+            return
+        with POSTAL_CODES_PATH.open(newline="", encoding="utf-8") as handle:
+            import csv
+
+            reader = csv.reader(handle, delimiter="\t")
+            rows = []
+            for row in reader:
+                if len(row) < 12 or row[0] != "CA":
+                    continue
+                postal_code = normalize_postal_code(row[1])
+                if not postal_code:
+                    continue
+                try:
+                    rows.append((postal_code, row[2].strip(), row[4].strip(), float(row[9]), float(row[10])))
+                except ValueError:
+                    continue
+        conn.executemany(
+            "INSERT OR REPLACE INTO postal_codes (postal_code, city, province, latitude, longitude) VALUES (?, ?, ?, ?, ?)",
+            rows,
         )
 
     def start_index_run(self, scope: str, started_at: str) -> int:
@@ -431,7 +469,15 @@ class AuctionStore:
         lot_rows = list(lots)
 
         with self.connect() as conn:
+            postal_cache: dict[str, tuple[str, str, float, float] | None] = {}
             for auction in auction_rows:
+                postal_code = normalize_postal_code(auction.get("postal_code"))
+                coords = None
+                if postal_code:
+                    coords = postal_cache.get(postal_code)
+                    if postal_code not in postal_cache:
+                        coords = postal_code_record(postal_code)
+                        postal_cache[postal_code] = coords
                 conn.execute(
                     """
                     INSERT INTO auctions (
@@ -463,10 +509,10 @@ class AuctionStore:
                         auction.get("address"),
                         auction.get("city"),
                         auction.get("state"),
-                        auction.get("postal_code"),
+                        postal_code or auction.get("postal_code"),
                         auction.get("country"),
-                        auction.get("latitude"),
-                        auction.get("longitude"),
+                        coords[2] if coords else auction.get("latitude"),
+                        coords[3] if coords else auction.get("longitude"),
                         auction.get("distance_miles"),
                         json.dumps(auction["raw_payload"], sort_keys=True),
                         indexed_at,
@@ -580,6 +626,8 @@ class AuctionStore:
         sort_by: str = "relevance",
         sources: Iterable[str] | None = None,
         ending_within_hours: int | None = None,
+        home_postal_code: str | None = None,
+        radius_km: float | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
@@ -591,6 +639,8 @@ class AuctionStore:
         offset = max(0, int(offset or 0))
         token_groups = expanded_query_tokens(query)
         source_filters = [source.strip() for source in (sources or []) if source and source.strip()]
+        home_postal_code = normalize_postal_code(home_postal_code)
+        radius_km = float(radius_km) if radius_km is not None else None
         candidate_ids: list[int] | None = None
         if normalize_text(query):
             try:
@@ -606,6 +656,9 @@ class AuctionStore:
                 a.title AS auction_title,
                 a.address AS auction_address,
                 a.distance_miles AS distance_miles,
+                a.latitude AS auction_latitude,
+                a.longitude AS auction_longitude,
+                a.postal_code AS auction_postal_code,
                 l.title AS lot_title,
                 l.lot_number AS lot_number,
                 l.current_bid AS current_bid,
@@ -640,8 +693,16 @@ class AuctionStore:
         with self.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         results = []
+        origin_coords = postal_code_record(home_postal_code) if home_postal_code else None
         for row in rows:
             image_url = _extract_image_url(row["raw_payload_json"], row["url"])
+            distance_km = None
+            if origin_coords and row["auction_latitude"] is not None and row["auction_longitude"] is not None:
+                _, _, origin_lat, origin_lon = origin_coords
+                distance_km = distance_between_postal_codes_km(home_postal_code, row["auction_postal_code"]) if row["auction_postal_code"] else None
+                if distance_km is None:
+                    from geocode import haversine_miles
+                    distance_km = haversine_miles((origin_lat, origin_lon), (row["auction_latitude"], row["auction_longitude"])) * 1.609344
             results.append(
                 {
                     "source": row["source"],
@@ -650,6 +711,7 @@ class AuctionStore:
                     "auction_address": row["auction_address"] or "",
                     "auctionAddress": row["auction_address"] or "",
                     "distance_miles": row["distance_miles"],
+                    "distance_km": distance_km,
                     "lot_title": row["lot_title"],
                     "lot_number": row["lot_number"] or "",
                     "current_bid": row["current_bid"],
@@ -671,6 +733,8 @@ class AuctionStore:
                 }
             )
         filtered = filter_and_sort_results(results, query)
+        if origin_coords and radius_km is not None:
+            filtered = [result for result in filtered if result.get("distance_km") is not None and result["distance_km"] <= radius_km]
         total = len(filtered)
         if sort_by == "relevance":
             return filtered[offset : offset + limit], total
@@ -688,6 +752,9 @@ class AuctionStore:
                 return (0 if has_price else 1, price, end_sort, title.lower())
             if sort_by == "price_high_low":
                 return (0 if has_price else 1, -price, end_sort, title.lower())
+            if sort_by == "proximity":
+                dist = result.get("distance_km")
+                return (0 if dist is not None else 1, dist if dist is not None else float("inf"), end_sort, title.lower())
             return (end_sort, title.lower())
 
         filtered.sort(key=sort_key)
@@ -747,6 +814,16 @@ class AuctionStore:
                 JOIN sources s ON s.id = l.source_id
                 """
             )
+
+    def get_postal_code_location(self, postal_code: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT postal_code, city, province, latitude, longitude FROM postal_codes WHERE postal_code = ?",
+                (normalize_postal_code(postal_code),),
+            ).fetchone()
+        if not row:
+            return None
+        return dict(row)
 
     def get_metadata(self) -> SearchMetadata:
         with self.connect() as conn:

@@ -59,7 +59,7 @@
       </section>
 
       <section class="search-shell search-shell-wide">
-        {{ search_bar(query, sort, sources, ending_within, available_sources, ending_window_options) }}
+        {{ search_bar(query, sort, sources, ending_within, available_sources, ending_window_options, request.args.get("home_postal_code", ""), request.args.get("radius_km", "")) }}
         <p class="search-hint">Submit on Enter. Clear the query to reset.</p>
       </section>
 
@@ -140,14 +140,14 @@
             <div class="pagination" id="pagination-shell">
               <a class="link-button{% if offset <= 0 %} disabled{% endif %}"
                  id="pagination-previous"
-                 href="{{ build_search_url(query=query, sort=sort, limit=limit, offset=(offset - limit if offset > 0 else 0), sources=sources, ending_within=ending_within) }}"
+                 href="{{ build_search_url(query=query, sort=sort, limit=limit, offset=(offset - limit if offset > 0 else 0), sources=sources, ending_within=ending_within, home_postal_code=request.args.get('home_postal_code', ''), radius_km=request.args.get('radius_km', '')) }}"
                  aria-disabled="{{ 'true' if offset <= 0 else 'false' }}">Previous</a>
               <span class="pagination-note" id="pagination-note">
                 Showing {{ offset + 1 }}-{{ [offset + results|length, total]|min }} of {{ total }}
               </span>
               <a class="link-button{% if offset + limit >= total %} disabled{% endif %}"
                  id="pagination-next"
-                 href="{{ build_search_url(query=query, sort=sort, limit=limit, offset=offset + limit, sources=sources, ending_within=ending_within) }}"
+                 href="{{ build_search_url(query=query, sort=sort, limit=limit, offset=offset + limit, sources=sources, ending_within=ending_within, home_postal_code=request.args.get('home_postal_code', ''), radius_km=request.args.get('radius_km', '')) }}"
                  aria-disabled="{{ 'true' if offset + limit >= total else 'false' }}">Next</a>
             </div>
           {% endif %}

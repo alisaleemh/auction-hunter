@@ -6,6 +6,8 @@ const form = document.getElementById("search-form");
 const queryInput = document.getElementById("q");
 const sortSelect = document.getElementById("sort");
 const endingWithinSelect = document.getElementById("ending_within");
+const homePostalCodeInput = document.getElementById("home_postal_code");
+const radiusKmInput = document.getElementById("radius_km");
 const sourceInputs = Array.from(document.querySelectorAll('input[name="source"]'));
 const clearButton = document.getElementById("clear-search");
 const submitButton = document.getElementById("search-submit");
@@ -36,6 +38,8 @@ const initialState = {
   total: Number(stateNode?.dataset.total || 0),
   sources: stateNode?.dataset.sources ? stateNode.dataset.sources.split(",").filter(Boolean) : Array.isArray(window.__INITIAL_SOURCES__) ? window.__INITIAL_SOURCES__ : [],
   endingWithin: stateNode?.dataset.endingWithin || window.__INITIAL_ENDING_WITHIN__ || "",
+  homePostalCode: new URL(window.location.href).searchParams.get("home_postal_code") || "",
+  radiusKm: new URL(window.location.href).searchParams.get("radius_km") || "",
   indexedAt: stateNode?.dataset.indexedAt || "",
   deployCommit: stateNode?.dataset.deployCommit || "",
   lastRunStatus: stateNode?.dataset.lastRunStatus || "",
@@ -136,6 +140,7 @@ function productResultCard(result) {
   if (result.lot_number) chips.push(buildChip(`Lot ${result.lot_number}`));
   if (result.condition) chips.push(buildChip(result.condition));
   if (result.auctionAddress) chips.push(buildChip(result.auctionAddress));
+  if (result.distance_km !== null && result.distance_km !== undefined) chips.push(buildChip(`${Number(result.distance_km).toFixed(1)} km away`));
   if (result.shipping_available !== null && result.shipping_available !== undefined) {
     chips.push(buildChip(result.shipping_available ? "Shipping" : "Pickup"));
   }
@@ -377,6 +382,8 @@ function updatePagination(query, sort, total, offset, count) {
 function collectFilterState() {
   initialState.sources = sourceInputs.filter((node) => node.checked).map((node) => node.value);
   initialState.endingWithin = endingWithinSelect?.value || "";
+  initialState.homePostalCode = homePostalCodeInput?.value || "";
+  initialState.radiusKm = radiusKmInput?.value || "";
 }
 
 function syncUrl(query, sort, offset = 0) {
@@ -392,6 +399,10 @@ function syncUrl(query, sort, offset = 0) {
   initialState.sources.forEach((source) => url.searchParams.append("source", source));
   if (initialState.endingWithin) url.searchParams.set("ending_within", String(initialState.endingWithin));
   else url.searchParams.delete("ending_within");
+  if (initialState.homePostalCode) url.searchParams.set("home_postal_code", initialState.homePostalCode);
+  else url.searchParams.delete("home_postal_code");
+  if (initialState.radiusKm) url.searchParams.set("radius_km", initialState.radiusKm);
+  else url.searchParams.delete("radius_km");
   window.history.replaceState({}, "", url);
 }
 
@@ -408,6 +419,8 @@ async function runSearch(query, sort, offset = 0) {
     });
     initialState.sources.forEach((source) => params.append("source", source));
     if (initialState.endingWithin) params.set("ending_within", String(initialState.endingWithin));
+    if (initialState.homePostalCode) params.set("home_postal_code", initialState.homePostalCode);
+    if (initialState.radiusKm) params.set("radius_km", initialState.radiusKm);
     const response = await fetch(`${initialState.apiUrl}?${params.toString()}`);
     if (!response.ok) {
       throw new Error(`Search failed (${response.status})`);
@@ -466,6 +479,8 @@ function initialize() {
   queryInput.value = initialState.query;
   sortSelect.value = initialState.sort || "ending_soonest";
   endingWithinSelect.value = initialState.endingWithin || "";
+  if (homePostalCodeInput) homePostalCodeInput.value = initialState.homePostalCode || "";
+  if (radiusKmInput) radiusKmInput.value = initialState.radiusKm || "";
   sourceInputs.forEach((input) => {
     input.checked = initialState.sources.includes(input.value);
   });
