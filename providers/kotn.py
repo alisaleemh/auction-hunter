@@ -58,14 +58,14 @@ def _current_auction_urls(html: str) -> list[str]:
     return urls
 
 
-def _parse_listing_data(html: str, *, url: str | None = None) -> dict[str, dict]:
+def _parse_listing_data(html: str, *, url: str | None = None) -> dict[str, dict] | None:
     match = re.search(r"var\s+listingData\s*=\s*(\{.*?\});", html, re.DOTALL)
     if not match:
         soup = BeautifulSoup(html, "html.parser")
         title = " ".join((soup.title.get_text(" ", strip=True) if soup.title else "").split())
         snippet = " ".join(html[:300].split())
-        logger.error("kotn missing listingData url=%s title=%s snippet=%s", url or "", title, snippet)
-        raise ValueError(f"King of the North page is missing listingData: {url or 'unknown url'}")
+        logger.warning("kotn missing listingData url=%s title=%s snippet=%s", url or "", title, snippet)
+        return None
     parsed = json.loads(match.group(1))
     return {str(key): value for key, value in parsed.items()}
 
@@ -159,8 +159,11 @@ def _parse_lots_page(
     html: str,
     *,
     window_end: datetime,
-) -> tuple[dict, list[dict], datetime | None, bool]:
+) -> tuple[dict | None, list[dict], datetime | None, bool]:
     listing_data = _parse_listing_data(html, url=auction_url)
+    if listing_data is None:
+        logger.warning("kotn skip page without listingData url=%s auction_id=%s", auction_url, auction_id)
+        return None, [], None, False
     soup = BeautifulSoup(html, "html.parser")
     auction = _auction_record(auction_id, auction_url, html)
     lots: list[dict] = []
@@ -240,7 +243,7 @@ def _fetch_auction_page(auction_url: str, page_number: int) -> tuple[int, str]:
     return page_number, _fetch_text(client, _auction_page_url(auction_url, page_number))
 
 
-def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime, max_pages: int) -> tuple[dict, list[dict]]:
+def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime, max_pages: int) -> tuple[dict | None, list[dict]]:
     logger.info("kotn auction start url=%s max_pages=%s", auction_url, max_pages)
     first_page_html = _fetch_text(_session(), _auction_page_url(auction_url, 1))
     match = re.search(r"/auctions/(\d+)$", auction_url)
@@ -253,6 +256,9 @@ def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime, max_pages
         first_page_html,
         window_end=window_end,
     )
+    if auction is None:
+        logger.warning("kotn auction skipped url=%s auction_id=%s reason=no listingData", auction_url, auction_id)
+        return None, []
     lots_by_id = {lot["provider_lot_id"]: lot for lot in first_page_lots}
     total_pages = _max_page_number(first_page_html)
     logger.info("kotn auction page1 url=%s auction_id=%s lots=%s total_pages=%s", auction_url, auction_id, len(first_page_lots), total_pages)
@@ -295,6 +301,8 @@ def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
         ]
         for future in as_completed(futures):
             auction, auction_lots = future.result()
+            if auction is None:
+                continue
             auctions[auction["provider_auction_id"]] = auction
             lots.extend(auction_lots)
 

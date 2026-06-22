@@ -122,3 +122,52 @@ def test_kotn_fetch_snapshot_filters_out_future_lots(monkeypatch):
     assert [lot["provider_lot_id"] for lot in snapshot.lots] == ["3941850"]
     assert snapshot.lots[0]["current_bid"] == 10
     assert snapshot.lots[0]["raw_payload"]["imageUrl"] == "https://example.com/image.jpg"
+
+
+def test_kotn_fetch_snapshot_skips_auction_pages_without_listing_data(monkeypatch, caplog):
+    listing_page = (FIXTURES / "kotn_auction_page.html").read_text(encoding="utf-8")
+    all_page = """
+    <!doctype html>
+    <html>
+      <body>
+        <nav>
+          <a href="/auctions/1051">June 21 - Huronia High-Value Auction</a>
+          <a href="/auctions/1052">June 21 - Huronia Pallet Auction</a>
+        </nav>
+      </body>
+    </html>
+    """
+    empty_page = """
+    <!doctype html>
+    <html>
+      <head><title>Pallet Auction | King of the North Auction</title></head>
+      <body>
+        <div class="listings-header-name">
+          <span class="text">Huronia Pallet Auction</span>
+        </div>
+        <div class="listings-grid">
+          <div class="listing-tile" data-id="9999999"></div>
+        </div>
+      </body>
+    </html>
+    """
+
+    def fake_fetch_text(session, url):
+        if url.endswith("/auctions/all"):
+            return all_page
+        if url.startswith("https://kotnauction.com/auctions/1051"):
+            return listing_page
+        if url.startswith("https://kotnauction.com/auctions/1052"):
+            return empty_page
+        raise AssertionError(url)
+
+    monkeypatch.setattr("providers.kotn._fetch_text", fake_fetch_text)
+
+    with caplog.at_level("WARNING"):
+        snapshot = fetch_snapshot({"now": "2026-06-18T00:00:00+00:00"})
+
+    assert snapshot.source == "King of the North Auction"
+    assert [auction["provider_auction_id"] for auction in snapshot.auctions] == ["1051"]
+    assert [lot["provider_lot_id"] for lot in snapshot.lots] == ["3941850"]
+    assert "kotn missing listingData url=https://kotnauction.com/auctions/1052" in caplog.text
+    assert "kotn auction skipped url=https://kotnauction.com/auctions/1052 auction_id=1052 reason=no listingData" in caplog.text
