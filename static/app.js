@@ -14,6 +14,10 @@ const resultsTitle = document.getElementById("results-title");
 const resultsSubtitle = document.getElementById("results-subtitle");
 const resultStatus = document.getElementById("result-status");
 const indexStatus = document.getElementById("index-status");
+const paginationShell = document.getElementById("pagination-shell");
+const paginationPrevious = document.getElementById("pagination-previous");
+const paginationNext = document.getElementById("pagination-next");
+const paginationNote = document.getElementById("pagination-note");
 const reindexButton = document.getElementById("reindex-button");
 const reindexStatus = document.getElementById("reindex-status");
 const progressShell = document.getElementById("index-progress-shell");
@@ -330,6 +334,46 @@ function updateSummary(query, count) {
   resultsSubtitle.textContent = `${count} ${count === 1 ? "match" : "matches"} for "${query}"`;
 }
 
+function updatePagination(query, sort, total, offset, count) {
+  if (!paginationShell || !paginationPrevious || !paginationNext || !paginationNote) return;
+  const limit = initialState.limit || 50;
+  const hasPagination = total > limit;
+  paginationShell.hidden = !hasPagination;
+  if (!hasPagination) {
+    return;
+  }
+
+  const previousOffset = Math.max(0, offset - limit);
+  const nextOffset = offset + limit;
+  const buildUrl = (pageOffset) => {
+    const url = new URL(window.location.href);
+    if (query) url.searchParams.set("q", query);
+    else url.searchParams.delete("q");
+    if (sort) url.searchParams.set("sort", sort);
+    else url.searchParams.delete("sort");
+    url.searchParams.set("limit", String(limit));
+    if (pageOffset > 0) url.searchParams.set("offset", String(pageOffset));
+    else url.searchParams.delete("offset");
+    url.searchParams.delete("source");
+    initialState.sources.forEach((source) => url.searchParams.append("source", source));
+    if (initialState.endingWithin) url.searchParams.set("ending_within", String(initialState.endingWithin));
+    else url.searchParams.delete("ending_within");
+    return url.pathname + "?" + url.searchParams.toString();
+  };
+
+  paginationPrevious.href = buildUrl(previousOffset);
+  paginationPrevious.classList.toggle("disabled", offset <= 0);
+  paginationPrevious.setAttribute("aria-disabled", offset <= 0 ? "true" : "false");
+
+  paginationNext.href = buildUrl(nextOffset);
+  paginationNext.classList.toggle("disabled", nextOffset >= total);
+  paginationNext.setAttribute("aria-disabled", nextOffset >= total ? "true" : "false");
+
+  const start = total === 0 ? 0 : offset + 1;
+  const end = Math.min(offset + count, total);
+  paginationNote.textContent = `Showing ${start}-${end} of ${total}`;
+}
+
 function collectFilterState() {
   initialState.sources = sourceInputs.filter((node) => node.checked).map((node) => node.value);
   initialState.endingWithin = endingWithinSelect?.value || "";
@@ -371,6 +415,7 @@ async function runSearch(query, sort, offset = 0) {
     const payload = await response.json();
     renderResults(payload.results || [], payload.query || query);
     updateSummary(payload.query || query, payload.total ?? payload.count ?? 0);
+    updatePagination(payload.query || query, payload.sort || sort, payload.total ?? 0, payload.offset ?? offset, payload.count ?? 0);
     resultStatus.textContent = payload.last_run_summary || "";
   } catch (error) {
     resultsList.innerHTML = emptyState("Search unavailable.", error instanceof Error ? error.message : "Unable to load search results.");
@@ -430,6 +475,7 @@ function initialize() {
   updateProgress();
   renderResults(initialState.results || [], initialState.query);
   updateSummary(initialState.query, initialState.total || initialState.results.length || 0);
+  updatePagination(initialState.query, initialState.sort || "ending_soonest", initialState.total || 0, initialState.offset || 0, initialState.results.length || 0);
 
   form?.addEventListener("submit", (event) => {
     event.preventDefault();

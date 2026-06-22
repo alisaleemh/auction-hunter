@@ -110,6 +110,58 @@ def _seed_store_with_extra_lot(store: AuctionStore):
     )
 
 
+def _seed_store_with_many_lots(store: AuctionStore, *, count: int = 5):
+    now = datetime.now(timezone.utc)
+    started_at = now.isoformat()
+    store.upsert_source_status("HiBid", "success", started_at, started_at, None)
+    run_id = store.start_index_run("manual", started_at)
+    store.upsert_snapshot(
+        "HiBid",
+        run_id,
+        started_at,
+        [
+            {
+                "provider_auction_id": "a1",
+                "title": "Auction",
+                "url": "https://example.com/auction",
+                "address": "20 Automatic Rd, Brampton, ON",
+                "city": "Brampton",
+                "state": "ON",
+                "postal_code": "L6S 5N6",
+                "country": "Canada",
+                "latitude": None,
+                "longitude": None,
+                "distance_miles": 3.2,
+                "raw_payload": {"id": "a1"},
+            }
+        ],
+        [
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="a1",
+                provider_lot_id=f"l{i}",
+                title=f"Baby Gate {i}",
+                lot_number=str(10 + i),
+                condition="Open Box",
+                description="A gate",
+                current_bid=i,
+                shipping_available=bool(i % 2),
+                end_time=(now + timedelta(days=2, hours=i)).isoformat(),
+                url=f"https://example.com/lot/{i}",
+            )
+            for i in range(1, count + 1)
+        ],
+    )
+    store.prune_source_rows("HiBid", run_id, (now + timedelta(days=7)).isoformat())
+    store.finish_index_run(
+        run_id,
+        (now + timedelta(minutes=5)).isoformat(),
+        {"HiBid": {"status": "success", "auctions": 1, "lots": count}},
+        "1/1 sources indexed",
+        None,
+    )
+
+
 def test_get_root_empty_query(tmp_path, monkeypatch):
     test_store = AuctionStore(tmp_path / "index.sqlite3")
     monkeypatch.setattr(auction_app, "store", test_store)
@@ -131,6 +183,21 @@ def test_get_root_renders_indexed_results(tmp_path, monkeypatch):
     assert b"Last indexed:" in response.data
 
 
+def test_get_root_renders_pagination_for_browse_and_search(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    _seed_store_with_many_lots(test_store, count=5)
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+
+    browse_response = client.get("/?limit=2")
+    assert browse_response.status_code == 200
+    assert b"Showing 1-2 of 5" in browse_response.data
+
+    search_response = client.get("/?q=gate&limit=2")
+    assert search_response.status_code == 200
+    assert b"Showing 1-2 of 5" in search_response.data
+
+
 def test_api_search_returns_indexed_shape(tmp_path, monkeypatch):
     test_store = AuctionStore(tmp_path / "index.sqlite3")
     _seed_store(test_store)
@@ -150,6 +217,19 @@ def test_api_search_returns_indexed_shape(tmp_path, monkeypatch):
     assert payload["indexed_lot_count"] == 1
     assert payload["indexed_auction_count"] == 1
     assert "time_left" in payload["results"][0]
+
+
+def test_api_search_returns_filtered_pagination_totals(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    _seed_store_with_many_lots(test_store, count=5)
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+    response = client.get("/api/search?q=gate&limit=2&offset=2")
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["count"] == 2
+    assert payload["total"] == 5
+    assert payload["offset"] == 2
 
 
 def test_api_status_reports_indexing_state(tmp_path, monkeypatch):
