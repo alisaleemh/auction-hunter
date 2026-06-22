@@ -65,6 +65,10 @@ select {
   align-items: start;
 }
 
+.search-shell-wide {
+  width: 100%;
+}
+
 .hero,
 .search-shell,
 .results-shell,
@@ -325,6 +329,10 @@ select {
   gap: 16px;
   position: sticky;
   top: 16px;
+}
+
+.sidebar-shell .config-shell {
+  margin-bottom: 0;
 }
 
 .filter-panel {

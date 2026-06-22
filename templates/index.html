@@ -58,47 +58,47 @@
         </div>
       </section>
 
-      <section class="config-shell">
-        <div class="results-header">
-          <div>
-            <h2>Index controls</h2>
-            <p class="muted">Change what gets scraped, then save and reindex.</p>
-          </div>
-          <div class="status-note" id="config-status" aria-live="polite"></div>
-        </div>
-        <form id="index-config-form" class="config-grid">
-          {% for source in index_sources %}
-            <section class="config-card" data-source-name="{{ source.name }}">
-              <h3>{{ source.label }}</h3>
-              {% if source.fields %}
-                {% for field in source.fields %}
-                  <label class="field">
-                    <span>{{ field.label }}</span>
-                    <input
-                      type="{{ field.type }}"
-                      name="{{ source.name }}.{{ field.key }}"
-                      value="{{ source.config.get(field.key, field.default) }}"
-                      {% if field.type == "number" %}min="1" step="1"{% endif %}
-                    >
-                  </label>
-                {% endfor %}
-              {% else %}
-                <p class="muted">No custom settings.</p>
-              {% endif %}
-            </section>
-          {% endfor %}
-          <div class="config-actions">
-            <button type="submit" class="primary-button">Save index settings</button>
-          </div>
-        </form>
+      <section class="search-shell search-shell-wide">
+        {{ search_bar(query, sort, sources, ending_within, available_sources, ending_window_options) }}
+        <p class="search-hint">Submit on Enter. Clear the query to reset.</p>
       </section>
 
       <div class="content-grid">
         <aside class="sidebar-shell">
-          <div class="search-shell">
-            {{ search_bar(query, sort, sources, ending_within, available_sources, ending_window_options) }}
-            <p class="search-hint">Submit on Enter. Clear the query to reset.</p>
-          </div>
+          <section class="config-shell">
+            <div class="results-header">
+              <div>
+                <h2>Index controls</h2>
+                <p class="muted">Change what gets scraped, then save and reindex.</p>
+              </div>
+              <div class="status-note" id="config-status" aria-live="polite"></div>
+            </div>
+            <form id="index-config-form" class="config-grid">
+              {% for source in index_sources %}
+                <section class="config-card" data-source-name="{{ source.name }}">
+                  <h3>{{ source.label }}</h3>
+                  {% if source.fields %}
+                    {% for field in source.fields %}
+                      <label class="field">
+                        <span>{{ field.label }}</span>
+                        <input
+                          type="{{ field.type }}"
+                          name="{{ source.name }}.{{ field.key }}"
+                          value="{{ source.config.get(field.key, field.default) }}"
+                          {% if field.type == "number" %}min="1" step="1"{% endif %}
+                        >
+                      </label>
+                    {% endfor %}
+                  {% else %}
+                    <p class="muted">No custom settings.</p>
+                  {% endif %}
+                </section>
+              {% endfor %}
+              <div class="config-actions">
+                <button type="submit" class="primary-button">Save index settings</button>
+              </div>
+            </form>
+          </section>
         </aside>
 
         <section class="results-shell">
