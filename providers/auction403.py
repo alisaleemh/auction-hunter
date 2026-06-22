@@ -55,7 +55,7 @@ def _current_auction_urls(html: str) -> list[str]:
     urls: list[str] = []
     for anchor in soup.select("a[href^='/auctions/']"):
         href = anchor.get("href", "")
-        if not re.match(r"^/auctions/\d", href):
+        if not re.match(r"^/auctions/\d+", href):
             continue
         full_url = urljoin(BASE_URL, href)
         if full_url not in urls:

@@ -265,6 +265,71 @@ def test_rebuild_fts_index_keeps_search_working(tmp_path):
     assert results[0]["lot_title"] == "Baby Gate"
 
 
+def test_query_results_filters_by_distance_and_sorts_by_proximity(tmp_path):
+    store = AuctionStore(tmp_path / "index.sqlite3")
+    now = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    started_at = to_iso(now)
+    store.upsert_source_status("HiBid", "success", started_at, started_at, None)
+    run_id = store.start_index_run("manual", started_at)
+    store.upsert_snapshot(
+        "HiBid",
+        run_id,
+        started_at,
+        [
+            {
+                "provider_auction_id": "near",
+                "title": "Near Auction",
+                "url": "https://example.com/near",
+                "address": "20 Automatic Rd, Brampton, ON L6S 5N6",
+                "city": "Brampton",
+                "state": "ON",
+                "postal_code": "L6S 5N6",
+                "country": "Canada",
+                "latitude": None,
+                "longitude": None,
+                "distance_miles": None,
+                "raw_payload": {"id": "near"},
+            },
+            {
+                "provider_auction_id": "far",
+                "title": "Far Auction",
+                "url": "https://example.com/far",
+                "address": "80 Westcreek Blvd, Unit 2, Brampton, Ontario L6T0B8",
+                "city": "Brampton",
+                "state": "ON",
+                "postal_code": "L6T0B8",
+                "country": "Canada",
+                "latitude": None,
+                "longitude": None,
+                "distance_miles": None,
+                "raw_payload": {"id": "far"},
+            },
+        ],
+        [
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="near",
+                provider_lot_id="l1",
+                title="Nearby Gate",
+                end_time=to_iso(now + timedelta(hours=2)),
+                url="https://example.com/lot/near",
+            ),
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="far",
+                provider_lot_id="l2",
+                title="Far Gate",
+                end_time=to_iso(now + timedelta(hours=2)),
+                url="https://example.com/lot/far",
+            ),
+        ],
+    )
+    store.prune_source_rows("HiBid", run_id, to_iso(now + timedelta(days=7)))
+    results, total = store.query_results("gate", now=now, home_postal_code="L9T 8N6", radius_km=100, sort_by="proximity")
+    assert total == 2
+    assert results[0]["distance_km"] <= results[1]["distance_km"]
+
+
 def test_metadata_reflects_last_run(tmp_path):
     store = AuctionStore(tmp_path / "index.sqlite3")
     run_id = store.start_index_run("manual", "2026-04-18T00:00:00+00:00")

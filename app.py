@@ -126,6 +126,16 @@ def _parse_ending_within(value: str | None) -> int | None:
     return parsed
 
 
+def _parse_radius_km(value: str | None) -> float | None:
+    try:
+        parsed = float(value) if value else None
+    except (TypeError, ValueError):
+        return None
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
+
+
 def _build_search_url(
     *,
     query: str,
@@ -134,6 +144,8 @@ def _build_search_url(
     offset: int,
     sources: list[str] | None = None,
     ending_within: int | None = None,
+    home_postal_code: str | None = None,
+    radius_km: float | None = None,
 ) -> str:
     params: list[tuple[str, str]] = []
     if query:
@@ -146,6 +158,10 @@ def _build_search_url(
         params.append(("offset", str(offset)))
     if ending_within:
         params.append(("ending_within", str(ending_within)))
+    if home_postal_code:
+        params.append(("home_postal_code", home_postal_code))
+    if radius_km:
+        params.append(("radius_km", str(radius_km)))
     for source in sources or []:
         params.append(("source", source))
     return "/?" + urlencode(params)
@@ -158,12 +174,16 @@ def run_search(
     offset: int = 0,
     sources: list[str] | None = None,
     ending_within_hours: int | None = None,
+    home_postal_code: str | None = None,
+    radius_km: float | None = None,
 ) -> tuple[list[dict], int, list[str]]:
     results, total = store.query_results(
         query,
         sort_by=sort_by,
         sources=sources,
         ending_within_hours=ending_within_hours,
+        home_postal_code=home_postal_code,
+        radius_km=radius_km,
         limit=limit,
         offset=offset,
     )
@@ -178,6 +198,8 @@ def index():
     offset = _parse_offset(request.args.get("offset"), 0)
     selected_sources = _parse_sources(request.args.getlist("source"))
     ending_within_hours = _parse_ending_within(request.args.get("ending_within"))
+    home_postal_code = request.args.get("home_postal_code", "").strip() or None
+    radius_km = _parse_radius_km(request.args.get("radius_km"))
     results, total, errors = run_search(
         query,
         sort_by=sort_by,
@@ -185,6 +207,8 @@ def index():
         offset=offset,
         sources=selected_sources,
         ending_within_hours=ending_within_hours,
+        home_postal_code=home_postal_code,
+        radius_km=radius_km,
     )
     metadata = store.get_metadata()
     return render_template(
@@ -195,6 +219,8 @@ def index():
         offset=offset,
         sources=selected_sources,
         ending_within=ending_within_hours,
+        home_postal_code=home_postal_code,
+        radius_km=radius_km,
         available_sources=AVAILABLE_SOURCES,
         ending_window_options=ENDING_WINDOW_OPTIONS,
         build_search_url=_build_search_url,
@@ -215,6 +241,8 @@ def api_search():
     offset = _parse_offset(request.args.get("offset"), 0)
     selected_sources = _parse_sources(request.args.getlist("source"))
     ending_within_hours = _parse_ending_within(request.args.get("ending_within"))
+    home_postal_code = request.args.get("home_postal_code", "").strip() or None
+    radius_km = _parse_radius_km(request.args.get("radius_km"))
     results, total, errors = run_search(
         query,
         sort_by=sort_by,
@@ -222,6 +250,8 @@ def api_search():
         offset=offset,
         sources=selected_sources,
         ending_within_hours=ending_within_hours,
+        home_postal_code=home_postal_code,
+        radius_km=radius_km,
     )
     metadata = metadata_payload()
     return jsonify(
@@ -237,6 +267,8 @@ def api_search():
             **metadata,
             "sources": selected_sources,
             "ending_within": ending_within_hours,
+            "home_postal_code": home_postal_code,
+            "radius_km": radius_km,
         }
     )
 

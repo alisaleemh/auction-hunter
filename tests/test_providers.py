@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from geocode import distance_from_l9t8n6_miles
+from geocode import distance_between_postal_codes_km, postal_code_record, normalize_postal_code
 from providers.auction403 import (
     _auction_address_from_html,
     _current_auction_urls,
@@ -18,7 +19,7 @@ from providers.hibid import (
 from providers.kotn import (
     _auction_location_from_html,
     _auction_title_from_html,
-    _current_auction_urls,
+    _current_auction_urls as _kotn_current_auction_urls,
     _parse_listing_data,
     fetch_snapshot,
 )
@@ -90,11 +91,18 @@ def test_distance_helper_uses_local_overrides():
     assert distance_from_l9t8n6_miles("Lake Shore Blvd E & Don Roadway Area, Toronto, Ontario M4M ***") is not None
 
 
+def test_postal_code_lookup_and_distance():
+    record = postal_code_record("L9T 8N6")
+    assert record is not None
+    assert normalize_postal_code("l9t 8n6") == "L9T8N6"
+    assert distance_between_postal_codes_km("L9T 8N6", "L6S 5N6") is not None
+
+
 def test_kotn_fixture_parses_auction_urls_title_and_listing_data():
     listing_page = (FIXTURES / "kotn_auction_page.html").read_text(encoding="utf-8")
     all_page = (FIXTURES / "kotn_auctions_all.html").read_text(encoding="utf-8")
 
-    urls = _current_auction_urls(all_page)
+    urls = _kotn_current_auction_urls(all_page)
     listing_data = _parse_listing_data(listing_page)
 
     assert urls == ["https://kotnauction.com/auctions/1051"]
