@@ -9,7 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from geocode import distance_from_l9t8n6_miles
-from models import ProviderSnapshot, make_lot_record
+from models import ProviderEstimate, ProviderSnapshot, make_lot_record
 
 
 BASE_URL = "https://www.403auction.com"
@@ -205,3 +205,15 @@ def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
             auctions.append(auction)
             lots.extend(auction_lots)
     return ProviderSnapshot(source="403 Auction", auctions=auctions, lots=lots)
+
+
+def estimate_snapshot(config: dict | None = None) -> ProviderEstimate:
+    client = _session()
+    listing_html = _fetch_text(client, AUCTIONS_URL)
+    auction_urls = _current_auction_urls(listing_html)
+    lot_count = 0
+    for auction_url in auction_urls:
+        html = _fetch_text(client, f"{auction_url}?page=1&pageSize=500")
+        apollo_state = _parse_apollo_state(html)
+        lot_count += sum(1 for key in apollo_state if key.startswith("AuctionLot."))
+    return ProviderEstimate(source="403 Auction", auctions=len(auction_urls), lots=lot_count)

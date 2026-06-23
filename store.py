@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS index_runs (
     progress_done INTEGER,
     progress_percent REAL,
     progress_message TEXT,
+    source_progress_json TEXT,
     source_stats_json TEXT,
     success_summary TEXT,
     error_text TEXT
@@ -127,6 +128,7 @@ class SearchMetadata:
     progress_done: int | None
     progress_percent: float | None
     progress_message: str | None
+    source_progress: dict[str, dict] | None
     indexed_source_count: int | None
     indexed_auction_count: int | None
     indexed_lot_count: int | None
@@ -290,6 +292,7 @@ class AuctionStore:
             ("progress_done", "INTEGER"),
             ("progress_percent", "REAL"),
             ("progress_message", "TEXT"),
+            ("source_progress_json", "TEXT"),
         ):
             if column not in index_run_columns:
                 conn.execute(f"ALTER TABLE index_runs ADD COLUMN {column} {ddl_type}")
@@ -366,15 +369,16 @@ class AuctionStore:
         progress_done: int | None,
         progress_percent: float | None,
         progress_message: str | None,
+        source_progress: dict[str, dict] | None = None,
     ) -> None:
         with self.connect() as conn:
             conn.execute(
                 """
                 UPDATE index_runs
-                SET heartbeat_at = ?, progress_total = ?, progress_done = ?, progress_percent = ?, progress_message = ?
+                SET heartbeat_at = ?, progress_total = ?, progress_done = ?, progress_percent = ?, progress_message = ?, source_progress_json = ?
                 WHERE id = ?
                 """,
-                (to_iso(utc_now()), progress_total, progress_done, progress_percent, progress_message, run_id),
+                (to_iso(utc_now()), progress_total, progress_done, progress_percent, progress_message, json.dumps(source_progress or {}, sort_keys=True), run_id),
             )
 
     def finish_index_run(
@@ -410,7 +414,7 @@ class AuctionStore:
             rows = conn.execute(
                 """
                 SELECT id, started_at, finished_at, scope, progress_total, progress_done, progress_percent,
-                       progress_message, success_summary, error_text
+                       progress_message, source_progress_json, success_summary, error_text
                 FROM index_runs
                 ORDER BY id DESC
                 LIMIT ?
@@ -441,6 +445,7 @@ class AuctionStore:
                     "progress_done": done,
                     "progress_percent": percent,
                     "progress_message": row["progress_message"],
+                    "source_progress": json.loads(row["source_progress_json"]) if row["source_progress_json"] else {},
                     "success_summary": row["success_summary"],
                     "error_text": row["error_text"],
                     "status": status,
@@ -899,7 +904,7 @@ class AuctionStore:
         with self.connect() as conn:
             last_success = conn.execute(
                 """
-                SELECT started_at, finished_at, success_summary, source_stats_json, heartbeat_at, progress_total, progress_done, progress_percent, progress_message
+                SELECT started_at, finished_at, success_summary, source_stats_json, heartbeat_at, progress_total, progress_done, progress_percent, progress_message, source_progress_json
                 FROM index_runs
                 WHERE error_text IS NULL OR error_text = ''
                 ORDER BY id DESC
@@ -910,7 +915,7 @@ class AuctionStore:
             last_run = conn.execute(
                 """
                 SELECT started_at, scope, finished_at, success_summary, error_text, heartbeat_at,
-                       progress_total, progress_done, progress_percent, progress_message
+                       progress_total, progress_done, progress_percent, progress_message, source_progress_json
                 FROM index_runs
                 ORDER BY id DESC
                 LIMIT 1
@@ -930,6 +935,29 @@ class AuctionStore:
             indexed_lot_count = sum(int(stats.get("lots", 0) or 0) for stats in source_stats.values())
         indexing = bool(last_run and last_run["finished_at"] is None and last_run["heartbeat_at"])
         stale = bool(last_run and last_run["finished_at"] is None and not indexing)
+        source_progress = {}
+        if last_run and last_run["source_progress_json"]:
+            try:
+                source_progress = json.loads(last_run["source_progress_json"])
+            except json.JSONDecodeError:
+                source_progress = {}
+        display_progress_total = last_run["progress_total"] if last_run else None
+        display_progress_done = last_run["progress_done"] if last_run else None
+        display_progress_percent = last_run["progress_percent"] if last_run else None
+        display_progress_message = last_run["progress_message"] if last_run else None
+        if source_progress:
+            total = 0
+            done = 0
+            for stats in source_progress.values():
+                if stats.get("total") is not None:
+                    total += int(stats.get("total") or 0)
+                if stats.get("done") is not None:
+                    done += int(stats.get("done") or 0)
+            if total:
+                display_progress_total = total
+                display_progress_done = done
+                display_progress_percent = round((done / total) * 100, 1)
+                display_progress_message = f"Indexed {done}/{total} items"
         return SearchMetadata(
             deploy_commit=None,
             indexed_at=(last_success["finished_at"] if last_success else None) or (latest_lot_indexed["indexed_at"] if latest_lot_indexed else None),
@@ -946,10 +974,11 @@ class AuctionStore:
                 if last_success and last_success["finished_at"] and parse_iso(last_success["started_at"]) and parse_iso(last_success["finished_at"])
                 else None
             ),
-            progress_total=last_run["progress_total"] if last_run else None,
-            progress_done=last_run["progress_done"] if last_run else None,
-            progress_percent=last_run["progress_percent"] if last_run else None,
-            progress_message=last_run["progress_message"] if last_run else None,
+            progress_total=display_progress_total,
+            progress_done=display_progress_done,
+            progress_percent=display_progress_percent,
+            progress_message=display_progress_message,
+            source_progress=source_progress or None,
             index_heartbeat_at=last_run["heartbeat_at"] if last_run else None,
             indexed_source_count=indexed_source_count,
             indexed_auction_count=indexed_auction_count,
