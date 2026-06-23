@@ -20,7 +20,12 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
 git archive --format=tar origin/main | tar -xf - -C "$tmpdir"
-rsync -a --exclude='data/geonames_ca_postal_codes.tsv' "$tmpdir"/ "$repo_root"/
+rsync -a --delete \
+  --exclude='.env' \
+  --exclude='data/auction_index.sqlite3' \
+  --exclude='data/geonames_ca_postal_codes.tsv' \
+  "$tmpdir"/ "$repo_root"/
+mv -f "$tmpdir/data/geonames_ca_postal_codes.tsv" "$repo_root/data/geonames_ca_postal_codes.tsv"
 
 docker compose config
 docker compose pull
