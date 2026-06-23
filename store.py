@@ -397,6 +397,16 @@ class AuctionStore:
 
     def get_index_run_history(self, limit: int = 5) -> list[dict]:
         with self.connect() as conn:
+            latest_running_row = conn.execute(
+                """
+                SELECT id
+                FROM index_runs
+                WHERE finished_at IS NULL AND (error_text IS NULL OR error_text = '')
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            latest_running_id = int(latest_running_row["id"]) if latest_running_row else None
             rows = conn.execute(
                 """
                 SELECT id, started_at, finished_at, scope, progress_total, progress_done, progress_percent,
@@ -408,11 +418,19 @@ class AuctionStore:
                 (max(1, int(limit)),),
             ).fetchall()
         history = []
+        seen_running = False
         for row in rows:
             total = row["progress_total"]
             done = row["progress_done"]
             percent = row["progress_percent"]
-            status = "running" if row["finished_at"] is None and row["error_text"] is None else ("failed" if row["error_text"] else "success")
+            if row["finished_at"] is None and row["error_text"] is None:
+                if not seen_running and latest_running_id and int(row["id"]) == latest_running_id:
+                    status = "running"
+                    seen_running = True
+                else:
+                    status = "stalled"
+            else:
+                status = "failed" if row["error_text"] else "success"
             history.append(
                 {
                     "id": row["id"],
