@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 
-from models import ProviderSnapshot, make_lot_record
+from models import ProviderEstimate, ProviderSnapshot, make_lot_record
 
 
 BASE_URL = "https://kotnauction.com"
@@ -308,3 +308,21 @@ def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
 
     logger.info("kotn snapshot done auctions=%s lots=%s", len(auctions), len(lots))
     return ProviderSnapshot(source=SOURCE_NAME, auctions=list(auctions.values()), lots=lots)
+
+
+def estimate_snapshot(config: dict | None = None) -> ProviderEstimate:
+    current = _reference_now(config)
+    max_pages = max(1, int((config or {}).get("max_pages") or DEFAULT_MAX_PAGES_PER_AUCTION))
+    listing_html = _fetch_text(_session(), AUCTIONS_URL)
+    auction_urls = _current_auction_urls(listing_html)
+    estimated_lots = 0
+    for auction_url in auction_urls:
+        html = _fetch_text(_session(), _auction_page_url(auction_url, 1))
+        soup = BeautifulSoup(html, "html.parser")
+        page_count = len(soup.select(".listing-tile[data-id]"))
+        total_pages = _max_page_number(html)
+        if total_pages > 1 and max_pages > 1:
+            estimated_lots += page_count * min(total_pages, max_pages)
+        else:
+            estimated_lots += page_count
+    return ProviderEstimate(source=SOURCE_NAME, auctions=len(auction_urls), lots=estimated_lots)

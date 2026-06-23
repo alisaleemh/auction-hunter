@@ -11,7 +11,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from geocode import distance_from_l9t8n6_miles
-from models import ProviderSnapshot, make_lot_record
+from models import ProviderEstimate, ProviderSnapshot, make_lot_record
 
 
 BASE_URL = "https://hibid.com"
@@ -242,3 +242,15 @@ def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
                 _, html = future.result()
                 _collect_page_snapshot(html, lots, auctions, seen_lots)
     return ProviderSnapshot(source="HiBid", auctions=list(auctions.values()), lots=lots)
+
+
+def estimate_snapshot(config: dict | None = None) -> ProviderEstimate:
+    config = config or {}
+    zip_code = str(config.get("zip_code") or DEFAULT_ZIP)
+    miles = int(config.get("miles") or DEFAULT_MILES)
+    html = _fetch_text(_session(), _lots_url(zip_code, miles))
+    apollo_state = _parse_state(html)
+    _, _, page_length, filtered_count = _root_search_refs(apollo_state)
+    if filtered_count:
+        return ProviderEstimate(source="HiBid", auctions=None, lots=int(filtered_count))
+    return ProviderEstimate(source="HiBid", auctions=None, lots=page_length)

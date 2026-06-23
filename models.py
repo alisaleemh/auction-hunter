@@ -12,6 +12,13 @@ class ProviderSnapshot:
     lots: list[dict]
 
 
+@dataclass(frozen=True)
+class ProviderEstimate:
+    source: str
+    auctions: int | None
+    lots: int | None
+
+
 def make_lot_record(
     source: str,
     provider_auction_id: str,
