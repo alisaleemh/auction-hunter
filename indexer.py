@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import threading
 import logging
 from typing import Callable
@@ -11,32 +11,7 @@ from providers import auction403, hibid, kotn
 from store import AuctionStore, SearchMetadata, to_iso, utc_now
 
 
-WINDOW_DAYS = 7
 logger = logging.getLogger(__name__)
-
-
-def _window_end(now: datetime) -> datetime:
-    return now + timedelta(days=WINDOW_DAYS)
-
-
-def _filter_snapshot(snapshot: ProviderSnapshot, now: datetime) -> ProviderSnapshot:
-    end = _window_end(now)
-    provider_auction_ids = set()
-    filtered_lots = []
-    for lot in snapshot.lots:
-        end_time = datetime.fromisoformat(lot["end_time"].replace("Z", "+00:00"))
-        if end_time.tzinfo is None:
-            end_time = end_time.replace(tzinfo=timezone.utc)
-        end_time = end_time.astimezone(timezone.utc)
-        if lot["status"] != "open":
-            continue
-        if end_time < now or end_time > end:
-            continue
-        filtered_lots.append(lot)
-        provider_auction_ids.add(lot["provider_auction_id"])
-
-    filtered_auctions = [auction for auction in snapshot.auctions if auction["provider_auction_id"] in provider_auction_ids]
-    return ProviderSnapshot(source=snapshot.source, auctions=filtered_auctions, lots=filtered_lots)
 
 
 def run_index(
@@ -131,9 +106,9 @@ def run_index(
                 )
                 logger.info("index source start run_id=%s source=%s", run_id, source_name)
                 try:
-                    snapshot = _filter_snapshot(future.result(), current)
+                    snapshot = future.result()
                     stats = store.upsert_snapshot(source_name, run_id, started_at, snapshot.auctions, snapshot.lots)
-                    store.prune_source_rows(source_name, run_id, to_iso(_window_end(current)))
+                    store.prune_source_rows(source_name, run_id, to_iso(current))
                     store.upsert_source_status(source_name, "success", started_at, started_at, None)
                     successful_sources.append(source_name)
                     source_stats[source_name] = {"status": "success", **stats}

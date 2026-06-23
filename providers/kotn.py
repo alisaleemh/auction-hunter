@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
@@ -20,7 +20,7 @@ REQUEST_TIMEOUT = 15
 PAGE_LENGTH = 100
 MAX_AUCTION_WORKERS = 3
 MAX_PAGE_WORKERS = 8
-DEFAULT_MAX_PAGES_PER_AUCTION = 1
+DEFAULT_MAX_PAGES_PER_AUCTION = 9999
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -157,8 +157,6 @@ def _parse_lots_page(
     auction_id: str,
     auction_url: str,
     html: str,
-    *,
-    window_end: datetime,
 ) -> tuple[dict | None, list[dict], datetime | None, bool]:
     listing_data = _parse_listing_data(html, url=auction_url)
     if listing_data is None:
@@ -183,8 +181,6 @@ def _parse_lots_page(
             page_min_end = end_time
 
         if listing.get("is_closed"):
-            continue
-        if end_time > window_end:
             continue
 
         title_link = tile.select_one(".listing-tile-title-link")
@@ -254,7 +250,6 @@ def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime, max_pages
         auction_id,
         auction_url,
         first_page_html,
-        window_end=window_end,
     )
     if auction is None:
         logger.warning("kotn auction skipped url=%s auction_id=%s reason=no listingData", auction_url, auction_id)
@@ -274,7 +269,6 @@ def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime, max_pages
                     auction_id,
                     auction_url,
                     page_html,
-                    window_end=window_end,
                 )
                 for lot in page_lots:
                     lots_by_id[lot["provider_lot_id"]] = lot
@@ -285,9 +279,8 @@ def _fetch_auction_snapshot(auction_url: str, *, window_end: datetime, max_pages
 
 def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
     current = _reference_now(config)
-    window_end = current + timedelta(days=7)
     max_pages = max(1, int((config or {}).get("max_pages") or DEFAULT_MAX_PAGES_PER_AUCTION))
-    logger.info("kotn snapshot start window_end=%s max_pages=%s", window_end.isoformat(), max_pages)
+    logger.info("kotn snapshot start max_pages=%s", max_pages)
     listing_html = _fetch_text(_session(), AUCTIONS_URL)
     auction_urls = _current_auction_urls(listing_html)
     logger.info("kotn snapshot auctions=%s urls=%s", len(auction_urls), auction_urls)
@@ -296,7 +289,7 @@ def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
 
     with ThreadPoolExecutor(max_workers=min(MAX_AUCTION_WORKERS, len(auction_urls) or 1)) as executor:
         futures = [
-            executor.submit(_fetch_auction_snapshot, auction_url, window_end=window_end, max_pages=max_pages)
+            executor.submit(_fetch_auction_snapshot, auction_url, window_end=current, max_pages=max_pages)
             for auction_url in auction_urls
         ]
         for future in as_completed(futures):

@@ -669,10 +669,6 @@ class AuctionStore:
                 (source_id, run_id),
             )
             conn.execute(
-                "DELETE FROM lots WHERE source_id = ? AND end_time > ?",
-                (source_id, window_end),
-            )
-            conn.execute(
                 "DELETE FROM lots WHERE source_id = ? AND status != 'open'",
                 (source_id,),
             )

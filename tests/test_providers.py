@@ -127,7 +127,7 @@ def test_kotn_fetch_snapshot_filters_out_future_lots(monkeypatch):
     snapshot = fetch_snapshot({"now": "2026-06-18T00:00:00+00:00"})
     assert snapshot.source == "King of the North Auction"
     assert [auction["provider_auction_id"] for auction in snapshot.auctions] == ["1051"]
-    assert [lot["provider_lot_id"] for lot in snapshot.lots] == ["3941850"]
+    assert [lot["provider_lot_id"] for lot in snapshot.lots] == ["3941850", "3941851"]
     assert snapshot.lots[0]["current_bid"] == 10
     assert snapshot.lots[0]["raw_payload"]["imageUrl"] == "https://example.com/image.jpg"
 
@@ -176,6 +176,6 @@ def test_kotn_fetch_snapshot_skips_auction_pages_without_listing_data(monkeypatc
 
     assert snapshot.source == "King of the North Auction"
     assert [auction["provider_auction_id"] for auction in snapshot.auctions] == ["1051"]
-    assert [lot["provider_lot_id"] for lot in snapshot.lots] == ["3941850"]
+    assert [lot["provider_lot_id"] for lot in snapshot.lots] == ["3941850", "3941851"]
     assert "kotn missing listingData url=https://kotnauction.com/auctions/1052" in caplog.text
     assert "kotn auction skipped url=https://kotnauction.com/auctions/1052 auction_id=1052 reason=no listingData" in caplog.text
