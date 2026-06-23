@@ -28,6 +28,7 @@ const progressLabel = document.getElementById("index-progress-label");
 const progressPercent = document.getElementById("index-progress-percent");
 const configForm = document.getElementById("index-config-form");
 const configStatus = document.getElementById("config-status");
+const themeToggle = document.getElementById("theme-toggle");
 
 const initialState = {
   apiUrl: stateNode?.dataset.apiUrl || "/api/search",
@@ -135,7 +136,7 @@ function timeBadgeClass(label) {
 }
 
 function productResultCard(result) {
-  const image = result.imageUrl ? `<img src="${escapeHtml(result.imageUrl)}" alt="" loading="lazy">` : '<div class="thumb-placeholder">No image</div>';
+  const image = result.imageUrl ? `<img src="${escapeHtml(result.imageUrl)}" alt="" loading="lazy">` : '<div class="thumb-placeholder"><span aria-hidden="true">□</span><span>No image</span></div>';
   const chips = [];
   if (result.lot_number) chips.push(buildChip(`Lot ${result.lot_number}`));
   if (result.condition) chips.push(buildChip(result.condition));
@@ -163,7 +164,7 @@ function productResultCard(result) {
         </div>
         ${result.description || result.details ? `<p class="result-copy">${escapeHtml(result.description || result.details)}</p>` : ""}
         <div class="result-links">
-          <a class="link-button" href="${escapeHtml(result.productUrl || result.url || "#")}" target="_blank" rel="noreferrer">Open lot</a>
+          <a class="link-button" href="${escapeHtml(result.productUrl || result.url || "#")}" target="_blank" rel="noreferrer">View lot <span aria-hidden="true">↗</span></a>
         </div>
       </div>
     </article>
@@ -476,6 +477,19 @@ async function triggerReindex() {
 }
 
 function initialize() {
+  const savedTheme = window.localStorage.getItem("auction-hunter-theme");
+  const preferredDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  const setTheme = (theme) => {
+    document.documentElement.dataset.theme = theme;
+    themeToggle?.setAttribute("aria-pressed", String(theme === "dark"));
+    themeToggle?.setAttribute("aria-label", `Switch to ${theme === "dark" ? "light" : "dark"} theme`);
+  };
+  setTheme(savedTheme || (preferredDark ? "dark" : "light"));
+  themeToggle?.addEventListener("click", () => {
+    const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    window.localStorage.setItem("auction-hunter-theme", nextTheme);
+    setTheme(nextTheme);
+  });
   queryInput.value = initialState.query;
   sortSelect.value = initialState.sort || "ending_soonest";
   endingWithinSelect.value = initialState.endingWithin || "";

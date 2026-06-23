@@ -170,6 +170,8 @@ def test_get_root_empty_query(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert b"All indexed lots" in response.data
     assert b"Reindex now" in response.data
+    assert b"theme-toggle" in response.data
+    assert b"Search lots, brands, or categories" in response.data
 
 
 def test_get_root_renders_indexed_results(tmp_path, monkeypatch):
