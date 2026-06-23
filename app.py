@@ -54,6 +54,10 @@ def metadata_payload() -> dict:
     }
 
 
+def indexing_history_payload() -> list[dict]:
+    return store.get_index_run_history(limit=5)
+
+
 def source_config_payload() -> list[dict]:
     sources = {source["name"]: source for source in store.get_sources()}
     return [
@@ -232,6 +236,7 @@ def index():
         metadata=metadata,
         deploy_commit=deploy_commit,
         index_sources=source_config_payload(),
+        indexing_history=indexing_history_payload(),
     )
 
 
@@ -277,7 +282,7 @@ def api_search():
 
 @app.get("/api/status")
 def api_status():
-    return jsonify(metadata_payload())
+    return jsonify({**metadata_payload(), "indexing_history": indexing_history_payload()})
 
 
 @app.get("/api/index-config")

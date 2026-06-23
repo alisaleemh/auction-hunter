@@ -26,8 +26,11 @@ const progressShell = document.getElementById("index-progress-shell");
 const progressFill = document.getElementById("index-progress-fill");
 const progressLabel = document.getElementById("index-progress-label");
 const progressPercent = document.getElementById("index-progress-percent");
+const historyBody = document.getElementById("history-body");
+const historyStatus = document.getElementById("history-status");
 const configForm = document.getElementById("index-config-form");
 const configStatus = document.getElementById("config-status");
+const themeToggle = document.getElementById("theme-toggle");
 
 const initialState = {
   apiUrl: stateNode?.dataset.apiUrl || "/api/search",
@@ -54,6 +57,7 @@ const initialState = {
   currentRunStartedAt: stateNode?.dataset.currentRunStartedAt || "",
   currentRunScope: stateNode?.dataset.currentRunScope || "",
   results: Array.isArray(window.__INITIAL_RESULTS__) ? window.__INITIAL_RESULTS__ : [],
+  indexingHistory: Array.isArray(window.__INITIAL_INDEXING_HISTORY__) ? window.__INITIAL_INDEXING_HISTORY__ : [],
 };
 
 function money(value) {
@@ -135,7 +139,7 @@ function timeBadgeClass(label) {
 }
 
 function productResultCard(result) {
-  const image = result.imageUrl ? `<img src="${escapeHtml(result.imageUrl)}" alt="" loading="lazy">` : '<div class="thumb-placeholder">No image</div>';
+  const image = result.imageUrl ? `<img src="${escapeHtml(result.imageUrl)}" alt="" loading="lazy">` : '<div class="thumb-placeholder"><span aria-hidden="true">□</span><span>No image</span></div>';
   const chips = [];
   if (result.lot_number) chips.push(buildChip(`Lot ${result.lot_number}`));
   if (result.condition) chips.push(buildChip(result.condition));
@@ -163,7 +167,7 @@ function productResultCard(result) {
         </div>
         ${result.description || result.details ? `<p class="result-copy">${escapeHtml(result.description || result.details)}</p>` : ""}
         <div class="result-links">
-          <a class="link-button" href="${escapeHtml(result.productUrl || result.url || "#")}" target="_blank" rel="noreferrer">Open lot</a>
+          <a class="link-button" href="${escapeHtml(result.productUrl || result.url || "#")}" target="_blank" rel="noreferrer">View lot <span aria-hidden="true">↗</span></a>
         </div>
       </div>
     </article>
@@ -233,6 +237,40 @@ function updateReindexStatus(payload) {
   reindexButton.disabled = false;
 }
 
+function historyBadgeClass(status) {
+  if (status === "running") return "history-badge running";
+  if (status === "failed") return "history-badge failed";
+  return "history-badge success";
+}
+
+function renderHistory(history) {
+  if (!historyBody) return;
+  if (!Array.isArray(history) || !history.length) {
+    historyBody.innerHTML = '<tr><td colspan="4" class="muted">No index runs yet.</td></tr>';
+    return;
+  }
+  historyBody.innerHTML = history.map((run) => {
+    const summary = run.error_text || run.success_summary || run.progress_message || "";
+    const items = Number.isFinite(Number(run.item_count)) ? Number(run.item_count) : 0;
+    return `
+      <tr data-history-run>
+        <td>
+          <div class="history-run">
+            <strong>${escapeHtml((run.scope || "manual").replace(/^./, (m) => m.toUpperCase()))}</strong>
+            <span class="muted">${escapeHtml(run.started_at || "")}</span>
+          </div>
+        </td>
+        <td>
+          <span class="${historyBadgeClass(run.status)}">${escapeHtml(run.status || "success")}</span>
+          ${summary ? `<div class="muted history-note">${escapeHtml(summary)}</div>` : ""}
+        </td>
+        <td>${items}</td>
+        <td>${escapeHtml(run.finished_at || "Running")}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
 function updateProgress(payload) {
   if (!progressShell || !progressFill || !progressLabel || !progressPercent) return;
 
@@ -254,6 +292,9 @@ function updateProgress(payload) {
   progressLabel.textContent = total > 0 ? `${label} (${done}/${total})` : label;
   progressPercent.textContent = indeterminate ? "..." : `${percent.toFixed(0)}%`;
   progressFill.parentElement?.setAttribute("aria-valuenow", indeterminate ? "0" : String(Math.round(percent)));
+  if (historyStatus) {
+    historyStatus.textContent = indexing ? "Index running" : "History loaded";
+  }
 }
 
 function readConfig() {
@@ -449,13 +490,16 @@ async function triggerReindex() {
     if (!response.ok && response.status !== 409) {
       throw new Error(`Reindex failed (${response.status})`);
     }
+    if (payload?.indexing_history) renderHistory(payload.indexing_history);
     updateReindexStatus(payload);
     updateProgress(payload);
+    if (payload?.indexing_history) renderHistory(payload.indexing_history);
     if (response.status === 202 || payload?.status === "started") {
       const poll = window.setInterval(async () => {
         try {
           const statusResponse = await fetch("/api/status");
           const statusPayload = await statusResponse.json();
+          if (statusPayload?.indexing_history) renderHistory(statusPayload.indexing_history);
           updateReindexStatus(statusPayload);
           updateProgress(statusPayload);
           if (!statusPayload.indexing) {
@@ -476,6 +520,19 @@ async function triggerReindex() {
 }
 
 function initialize() {
+  const savedTheme = window.localStorage.getItem("auction-hunter-theme");
+  const preferredDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  const setTheme = (theme) => {
+    document.documentElement.dataset.theme = theme;
+    themeToggle?.setAttribute("aria-pressed", String(theme === "dark"));
+    themeToggle?.setAttribute("aria-label", `Switch to ${theme === "dark" ? "light" : "dark"} theme`);
+  };
+  setTheme(savedTheme || (preferredDark ? "dark" : "light"));
+  themeToggle?.addEventListener("click", () => {
+    const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    window.localStorage.setItem("auction-hunter-theme", nextTheme);
+    setTheme(nextTheme);
+  });
   queryInput.value = initialState.query;
   sortSelect.value = initialState.sort || "ending_soonest";
   endingWithinSelect.value = initialState.endingWithin || "";
@@ -488,6 +545,7 @@ function initialize() {
   updateTimeLeft();
   updateReindexStatus();
   updateProgress();
+  renderHistory(initialState.indexingHistory);
   renderResults(initialState.results || [], initialState.query);
   updateSummary(initialState.query, initialState.total || initialState.results.length || 0);
   updatePagination(initialState.query, initialState.sort || "ending_soonest", initialState.total || 0, initialState.offset || 0, initialState.results.length || 0);

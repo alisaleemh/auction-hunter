@@ -2,7 +2,8 @@
 <form id="search-form" class="search-bar" method="get" action="/">
   <div class="search-input-wrap">
     <label class="sr-only" for="q">Search products</label>
-    <input id="q" name="q" type="search" value="{{ query }}" placeholder="Search lot title, condition, details, or auction name" autocomplete="off" />
+    <span class="search-glyph" aria-hidden="true">⌕</span>
+    <input id="q" name="q" type="search" value="{{ query }}" placeholder="Search lots, brands, or categories" autocomplete="off" />
     <button class="icon-button clear-button" type="button" id="clear-search" aria-label="Clear search">Clear</button>
   </div>
   <div class="search-actions">
@@ -16,6 +17,8 @@
     </select>
     <button class="primary-button" id="search-submit" type="submit">Search</button>
   </div>
+  <details class="filters-disclosure" {% if sources or ending_within or home_postal_code or radius_km %}open{% endif %}>
+    <summary><span>Filters</span><span class="filter-summary">Source, timing &amp; distance</span></summary>
   <aside class="filter-panel" aria-label="Search filters">
     <div class="filter-group">
       <p class="filter-label">Auction sources</p>
@@ -46,6 +49,7 @@
       <input id="radius_km" name="radius_km" type="number" min="1" step="1" value="{{ radius_km or '' }}" placeholder="50">
     </div>
   </aside>
+  </details>
 </form>
 {%- endmacro %}
 
@@ -74,7 +78,7 @@
     {% if result.imageUrl %}
       <img src="{{ result.imageUrl }}" alt="" loading="lazy">
     {% else %}
-      <div class="thumb-placeholder">No image</div>
+      <div class="thumb-placeholder"><span aria-hidden="true">□</span><span>No image</span></div>
     {% endif %}
   </div>
   <div class="result-body">
@@ -85,7 +89,7 @@
           <a href="{{ result.productUrl or result.url }}" target="_blank" rel="noreferrer">{{ result.lot_title }}</a>
         </h2>
       </div>
-      <div class="result-price">
+      <div class="result-price" aria-label="Current price">
         {% if result.currentPrice is not none %}
           <span>${{ '{:,.2f}'.format(result.currentPrice) }}</span>
         {% else %}
@@ -118,7 +122,7 @@
       <p class="result-copy">{{ result.description or result.details }}</p>
     {% endif %}
     <div class="result-links">
-      <a class="link-button" href="{{ result.productUrl or result.url }}" target="_blank" rel="noreferrer">Open lot</a>
+      <a class="link-button" href="{{ result.productUrl or result.url }}" target="_blank" rel="noreferrer">View lot <span aria-hidden="true">↗</span></a>
     </div>
   </div>
 </article>

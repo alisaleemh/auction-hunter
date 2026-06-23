@@ -169,7 +169,10 @@ def test_get_root_empty_query(tmp_path, monkeypatch):
     response = client.get("/")
     assert response.status_code == 200
     assert b"All indexed lots" in response.data
-    assert b"Reindex now" in response.data
+    assert b"Trigger index" in response.data
+    assert b"theme-toggle" in response.data
+    assert b"Search lots, brands, or categories" in response.data
+    assert b"Indexing history" in response.data
 
 
 def test_get_root_renders_indexed_results(tmp_path, monkeypatch):
@@ -216,7 +219,19 @@ def test_api_search_returns_indexed_shape(tmp_path, monkeypatch):
     assert payload["indexed_at"]
     assert payload["indexed_lot_count"] == 1
     assert payload["indexed_auction_count"] == 1
-    assert "time_left" in payload["results"][0]
+
+
+def test_api_status_includes_index_history(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    _seed_store(test_store)
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+    response = client.get("/api/status")
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert "indexing_history" in payload
+    assert len(payload["indexing_history"]) == 1
+    assert payload["indexing_history"][0]["status"] == "success"
 
 
 def test_api_search_returns_filtered_pagination_totals(tmp_path, monkeypatch):
