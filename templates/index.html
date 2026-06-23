@@ -23,6 +23,10 @@
           <p class="hero-copy">Search live lots across the auctions you care about, then sort by timing, price, or distance.</p>
         </div>
         <div class="status-stack">
+          <span class="pill live-pill"><span class="status-dot" aria-hidden="true"></span>Updated every 6h</span>
+          <span class="pill" id="index-status" data-indexed-at="{{ metadata.indexed_at or '' }}">
+            Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
+          </span>
           {% if deploy_commit %}
             <span class="pill subtle" title="Commit deployed in the current container">
               Deployed commit {{ deploy_commit }}
