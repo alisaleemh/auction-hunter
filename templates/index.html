@@ -23,37 +23,11 @@
           <p class="hero-copy">Search live lots across the auctions you care about, then sort by timing, price, or distance.</p>
         </div>
         <div class="status-stack">
-          <span class="pill live-pill"><span class="status-dot" aria-hidden="true"></span>Updated every 6h</span>
-          <span class="pill" id="index-status" data-indexed-at="{{ metadata.indexed_at or '' }}">
-            Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
-          </span>
           {% if deploy_commit %}
             <span class="pill subtle" title="Commit deployed in the current container">
               Deployed commit {{ deploy_commit }}
             </span>
           {% endif %}
-          {% if metadata.last_run_duration_seconds is not none %}
-            <span class="pill subtle">
-              Last run took {{ "%.0f"|format((metadata.last_run_duration_seconds / 60) if metadata.last_run_duration_seconds < 3600 else (metadata.last_run_duration_seconds / 3600)) }}{{ "m" if metadata.last_run_duration_seconds < 3600 else "h" }}
-            </span>
-          {% endif %}
-          {% set last_success_duration = metadata.last_success_duration_seconds if metadata.last_success_duration_seconds is defined else none %}
-          {% if last_success_duration is not none %}
-            <span class="pill subtle">
-              Last successful index took {{ "%.0f"|format((last_success_duration / 60) if last_success_duration < 3600 else (last_success_duration / 3600)) }}{{ "m" if last_success_duration < 3600 else "h" }}
-            </span>
-          {% endif %}
-          <button type="button" class="pill action-pill" id="reindex-button">Reindex now</button>
-          <span class="pill subtle reindex-status" id="reindex-status" aria-live="polite">Checking reindex status...</span>
-          <div class="progress-shell" id="index-progress-shell" aria-live="polite">
-            <div class="progress-track" role="progressbar" aria-label="Index progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-              <div class="progress-fill" id="index-progress-fill"></div>
-            </div>
-            <div class="progress-meta">
-              <span class="progress-label" id="index-progress-label">Waiting for progress</span>
-              <span class="progress-percent" id="index-progress-percent">0%</span>
-            </div>
-          </div>
           {% if metadata.indexed_lot_count is not none %}
             <span class="pill subtle">
               Indexed {{ metadata.indexed_lot_count }} lots{% if metadata.indexed_auction_count is not none %} across {{ metadata.indexed_auction_count }} auctions{% endif %}{% if metadata.indexed_source_count is not none %} from {{ metadata.indexed_source_count }} sources{% endif %}
@@ -62,6 +36,10 @@
           {% if metadata.last_run_status %}
             <span class="pill subtle">{{ metadata.last_run_status|capitalize }}{% if metadata.last_run_finished_at %} · {{ metadata.last_run_finished_at }}{% endif %}</span>
           {% endif %}
+          <span class="pill live-pill"><span class="status-dot" aria-hidden="true"></span>{{ "Indexing..." if metadata.indexing else "Ready" }}</span>
+          <span class="pill" id="index-status" data-indexed-at="{{ metadata.indexed_at or '' }}">
+            Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
+          </span>
         </div>
       </section>
 
@@ -106,6 +84,72 @@
                 <button type="submit" class="primary-button">Save index settings</button>
               </div>
             </form>
+          </section>
+          <section class="config-shell history-shell">
+            <div class="panel-heading">
+              <span class="panel-icon" aria-hidden="true">⟲</span>
+              <div>
+                <h2>Indexing history</h2>
+                <p class="muted">Last five runs, with outcome and item counts.</p>
+              </div>
+              <div class="status-note" id="history-status" aria-live="polite"></div>
+            </div>
+            <details class="history-details" open>
+              <summary><span>Recent runs</span><span class="filter-summary">Expand table</span></summary>
+              <div class="history-panel">
+                <div class="history-table-wrap">
+                  <table class="history-table" aria-label="Recent index runs">
+                    <thead>
+                      <tr>
+                        <th>Run</th>
+                        <th>Status</th>
+                        <th>Items</th>
+                        <th>Time</th>
+                      </tr>
+                    </thead>
+                    <tbody id="history-body">
+                      {% for run in indexing_history %}
+                        <tr data-history-run>
+                          <td>
+                            <div class="history-run">
+                              <strong>{{ run.scope|capitalize }}</strong>
+                              <span class="muted">{{ run.started_at }}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <span class="history-badge {{ run.status }}">{{ run.status }}</span>
+                            {% if run.error_text %}
+                              <div class="muted history-note">{{ run.error_text }}</div>
+                            {% elif run.success_summary %}
+                              <div class="muted history-note">{{ run.success_summary }}</div>
+                            {% elif run.progress_message %}
+                              <div class="muted history-note">{{ run.progress_message }}</div>
+                            {% endif %}
+                          </td>
+                          <td>{{ run.item_count or 0 }}</td>
+                          <td>{{ run.finished_at or "Running" }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
+            <div class="config-actions history-actions">
+              <button type="button" class="primary-button" id="reindex-button">Trigger index</button>
+              <div class="index-status-stack">
+                <span class="pill subtle reindex-status" id="reindex-status" aria-live="polite">Checking indexing status...</span>
+                <div class="progress-shell" id="index-progress-shell" aria-live="polite">
+                  <div class="progress-track" role="progressbar" aria-label="Index progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div class="progress-fill" id="index-progress-fill"></div>
+                  </div>
+                  <div class="progress-meta">
+                    <span class="progress-label" id="index-progress-label">Waiting for progress</span>
+                    <span class="progress-percent" id="index-progress-percent">0%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
         </aside>
 
@@ -187,14 +231,16 @@
       data-progress-done="{{ metadata.progress_done or '' }}"
       data-progress-percent="{{ metadata.progress_percent or '' }}"
       data-progress-message="{{ metadata.progress_message or '' }}"
+      data-indexing-history="{{ indexing_history|tojson|e }}"
     ></div>
     <script>
       window.__INITIAL_RESULTS__ = {{ results|tojson }};
       window.__INITIAL_QUERY__ = {{ query|tojson }};
       window.__INITIAL_SORT__ = {{ sort|tojson }};
       window.__INITIAL_LIMIT__ = {{ limit|tojson }};
-      window.__INITIAL_SOURCES__ = {{ sources|tojson }};
-      window.__INITIAL_ENDING_WITHIN__ = {{ ending_within|tojson }};
+    window.__INITIAL_SOURCES__ = {{ sources|tojson }};
+    window.__INITIAL_ENDING_WITHIN__ = {{ ending_within|tojson }};
+    window.__INITIAL_INDEXING_HISTORY__ = {{ indexing_history|tojson }};
     </script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>

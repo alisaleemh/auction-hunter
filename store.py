@@ -395,6 +395,42 @@ class AuctionStore:
                 (finished_at, json.dumps(source_stats, sort_keys=True), success_summary, error_text, run_id),
             )
 
+    def get_index_run_history(self, limit: int = 5) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, started_at, finished_at, scope, progress_total, progress_done, progress_percent,
+                       progress_message, success_summary, error_text
+                FROM index_runs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
+            ).fetchall()
+        history = []
+        for row in rows:
+            total = row["progress_total"]
+            done = row["progress_done"]
+            percent = row["progress_percent"]
+            status = "running" if row["finished_at"] is None and row["error_text"] is None else ("failed" if row["error_text"] else "success")
+            history.append(
+                {
+                    "id": row["id"],
+                    "started_at": row["started_at"],
+                    "finished_at": row["finished_at"],
+                    "scope": row["scope"],
+                    "progress_total": total,
+                    "progress_done": done,
+                    "progress_percent": percent,
+                    "progress_message": row["progress_message"],
+                    "success_summary": row["success_summary"],
+                    "error_text": row["error_text"],
+                    "status": status,
+                    "item_count": done if done is not None else total,
+                }
+            )
+        return history
+
     def upsert_source_status(
         self,
         source_name: str,
