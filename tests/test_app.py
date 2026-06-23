@@ -259,6 +259,22 @@ def test_api_status_reports_indexing_state(tmp_path, monkeypatch):
     assert payload["deploy_commit"] == "2f7a19e"
 
 
+def test_root_includes_all_enabled_sources_in_filter(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    _seed_store(test_store)
+    now = datetime.now(timezone.utc)
+    started_at = now.isoformat()
+    test_store.upsert_source_status("403 Auction", "success", started_at, started_at, None)
+    test_store.upsert_source_status("King of the North Auction", "success", started_at, started_at, None)
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+    response = client.get("/")
+    assert response.status_code == 200
+    assert b"HiBid" in response.data
+    assert b"403 Auction" in response.data
+    assert b"King of the North Auction" in response.data
+
+
 def test_api_index_config_round_trip(tmp_path, monkeypatch):
     test_store = AuctionStore(tmp_path / "index.sqlite3")
     monkeypatch.setattr(auction_app, "store", test_store)

@@ -93,7 +93,6 @@ def _manual_reindex_worker() -> None:
         run_index(store, scope="manual")
     finally:
         manual_index_lock.release()
-AVAILABLE_SOURCES = ("403 Auction", "HiBid")
 ENDING_WINDOW_OPTIONS = (
     ("6", "Ending within 6 hours"),
     ("24", "Ending within 24 hours"),
@@ -119,7 +118,8 @@ def _parse_offset(value: str | None, default: int = 0) -> int:
 def _parse_sources(values: list[str] | None) -> list[str]:
     if not values:
         return []
-    return [value for value in values if value in AVAILABLE_SOURCES]
+    available_sources = {source["name"] for source in store.get_sources() if source.get("enabled")}
+    return [value for value in values if value in available_sources]
 
 
 def _parse_ending_within(value: str | None) -> int | None:
@@ -217,6 +217,7 @@ def index():
         radius_km=radius_km,
     )
     metadata = store.get_metadata()
+    available_sources = [source["name"] for source in store.get_sources() if source.get("enabled")]
     return render_template(
         "index.html",
         query=query,
@@ -227,7 +228,7 @@ def index():
         ending_within=ending_within_hours,
         home_postal_code=home_postal_code,
         radius_km=radius_km,
-        available_sources=AVAILABLE_SOURCES,
+        available_sources=available_sources,
         ending_window_options=ENDING_WINDOW_OPTIONS,
         build_search_url=_build_search_url,
         results=results,
