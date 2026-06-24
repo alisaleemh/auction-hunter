@@ -81,11 +81,19 @@ def run_index(
     } if loaders is default_loaders else {}
 
     source_stats: dict[str, dict] = {}
-    source_progress: dict[str, dict] = {name: {"total": None, "done": 0, "status": "queued"} for name in loaders}
+    source_progress: dict[str, dict] = {
+        name: {"total": None, "estimated": None, "done": 0, "indexed": 0, "status": "queued"} for name in loaders
+    }
     for source_name, estimator in estimators.items():
         try:
             estimate = estimator()
-            source_progress[source_name] = {"total": estimate.lots, "done": 0, "status": "estimated"}
+            source_progress[source_name] = {
+                "total": estimate.lots,
+                "estimated": estimate.lots,
+                "done": 0,
+                "indexed": 0,
+                "status": "estimated",
+            }
         except Exception as exc:
             logger.warning("index estimate failed source=%s error=%s", source_name, exc)
     successful_sources: list[str] = []
@@ -118,7 +126,9 @@ def run_index(
                 store.upsert_source_status(source_name, "running", started_at, None, None)
                 source_progress[source_name] = {
                     "total": source_progress.get(source_name, {}).get("total"),
+                    "estimated": source_progress.get(source_name, {}).get("estimated"),
                     "done": 0,
+                    "indexed": 0,
                     "status": "running",
                 }
                 store.update_index_run_progress(
@@ -137,7 +147,16 @@ def run_index(
                     store.upsert_source_status(source_name, "success", started_at, started_at, None)
                     successful_sources.append(source_name)
                     source_stats[source_name] = {"status": "success", **stats}
-                    source_progress[source_name] = {"total": stats.get("lots", 0), "done": stats.get("lots", 0), "status": "success"}
+                    estimated = source_progress.get(source_name, {}).get("estimated")
+                    indexed = int(stats.get("lots") or 0)
+                    source_progress[source_name] = {
+                        "total": estimated if estimated is not None else indexed,
+                        "estimated": estimated,
+                        "done": indexed,
+                        "indexed": indexed,
+                        "status": "success",
+                        "validated": estimated == indexed if estimated is not None else None,
+                    }
                     logger.info(
                         "index source success run_id=%s source=%s auctions=%s lots=%s",
                         run_id,
@@ -149,19 +168,34 @@ def run_index(
                     error_text = str(exc)
                     store.upsert_source_status(source_name, "error", started_at, started_at, error_text)
                     source_stats[source_name] = {"status": "error", "error": error_text}
-                    source_progress[source_name] = {"total": None, "done": 0, "status": "error"}
+                    source_progress[source_name] = {
+                        "total": source_progress.get(source_name, {}).get("estimated"),
+                        "estimated": source_progress.get(source_name, {}).get("estimated"),
+                        "done": 0,
+                        "indexed": 0,
+                        "status": "error",
+                        "validated": False,
+                    }
                     errors.append(f"{source_name}: {error_text}")
                     logger.exception("index source error run_id=%s source=%s error=%s", run_id, source_name, error_text)
                 completed += 1
                 finished_total = sum(int(stats.get("total") or 0) for stats in source_progress.values() if stats.get("total") is not None)
                 finished_done = sum(int(stats.get("done") or 0) for stats in source_progress.values())
                 progress_percent = round((finished_done / finished_total) * 100, 1) if finished_total else round((completed / len(loaders)) * 100, 1)
+                validation_summary = []
+                for name, stats in source_progress.items():
+                    if stats.get("estimated") is None:
+                        continue
+                    validation_summary.append(f"{name}: {stats.get('indexed', 0)}/{stats.get('estimated')} validated")
                 store.update_index_run_progress(
                     run_id,
                     progress_total=finished_total or len(loaders),
                     progress_done=finished_done,
                     progress_percent=progress_percent,
-                    progress_message=f"Indexed {finished_done}/{finished_total or len(loaders)} items",
+                    progress_message=(
+                        f"Indexed {finished_done}/{finished_total or len(loaders)} items"
+                        + (f"; {'; '.join(validation_summary)}" if validation_summary else "")
+                    ),
                     source_progress=source_progress,
                 )
     finally:
