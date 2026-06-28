@@ -16,11 +16,10 @@
           <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch color theme" aria-pressed="false"><span aria-hidden="true">◐</span><span class="theme-toggle-label">Theme</span></button>
         </div>
       </header>
-      <section class="hero">
+      <section class="hero hero-search-led">
         <div class="hero-content">
-          <p class="eyebrow">Auction intelligence</p>
-          <h1>Find the next great<br><span>bid before it ends.</span></h1>
-          <p class="hero-copy">Search live lots across the auctions you care about, then sort by timing, price, or distance.</p>
+          <p class="eyebrow">Search auctions</p>
+          <h1>Search lots.</h1>
         </div>
         <div class="status-stack">
           {% if deploy_commit %}
@@ -43,9 +42,9 @@
         </div>
       </section>
 
-      <section class="search-shell search-shell-wide">
+      <section class="search-shell search-shell-wide search-shell-accent">
         {{ search_bar(query, sort, sources, ending_within, available_sources, ending_window_options, request.args.get("home_postal_code", ""), request.args.get("radius_km", "")) }}
-        <p class="search-hint">Press <kbd>Enter</kbd> to search. Add filters to narrow your next bid.</p>
+        <p class="search-hint">Press <kbd>Enter</kbd> to search.</p>
       </section>
 
       <div class="content-grid">
