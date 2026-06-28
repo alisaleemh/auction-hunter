@@ -241,6 +241,18 @@ def index():
     )
 
 
+@app.get("/admin")
+def admin():
+    metadata = store.get_metadata()
+    return render_template(
+        "admin.html",
+        metadata=metadata,
+        deploy_commit=deploy_commit,
+        index_sources=source_config_payload(),
+        indexing_history=indexing_history_payload(),
+    )
+
+
 @app.get("/api/search")
 def api_search():
     query = request.args.get("q", "").strip()

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Auction Hunter Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Auction Hunter home"><span class="brand-mark" aria-hidden="true">A</span><span>Auction Hunter</span></a>
+        <div class="topbar-actions">
+          <span class="desktop-only">Admin only.</span>
+          <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch color theme" aria-pressed="false"><span aria-hidden="true">◐</span><span class="theme-toggle-label">Theme</span></button>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div class="hero-content">
+          <p class="eyebrow">Admin</p>
+          <h1>Index controls<br><span>and run history.</span></h1>
+          <p class="hero-copy">Save source settings, trigger a reindex, and inspect the last five runs here.</p>
+        </div>
+        <div class="status-stack">
+          {% if deploy_commit %}
+            <span class="pill subtle" title="Commit deployed in the current container">
+              Deployed commit {{ deploy_commit }}
+            </span>
+          {% endif %}
+          {% if metadata.indexed_lot_count is not none %}
+            <span class="pill subtle">
+              Indexed {{ metadata.indexed_lot_count }} lots{% if metadata.indexed_auction_count is not none %} across {{ metadata.indexed_auction_count }} auctions{% endif %}{% if metadata.indexed_source_count is not none %} from {{ metadata.indexed_source_count }} sources{% endif %}
+            </span>
+          {% endif %}
+          {% if metadata.last_run_status %}
+            <span class="pill subtle">{{ metadata.last_run_status|capitalize }}{% if metadata.last_run_finished_at %} · {{ metadata.last_run_finished_at }}{% endif %}</span>
+          {% endif %}
+          <span class="pill live-pill"><span class="status-dot" aria-hidden="true"></span>{{ "Indexing..." if metadata.indexing else "Ready" }}</span>
+          <span class="pill" id="index-status" data-indexed-at="{{ metadata.indexed_at or '' }}">
+            Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
+          </span>
+        </div>
+      </section>
+
+      <div class="content-grid">
+        <aside class="sidebar-shell">
+          <section class="config-shell">
+            <div class="panel-heading">
+              <span class="panel-icon" aria-hidden="true">⌁</span>
+              <div>
+                <h2>Index controls</h2>
+                <p class="muted">Change what gets scraped, then save and reindex.</p>
+              </div>
+              <div class="status-note" id="config-status" aria-live="polite"></div>
+            </div>
+            <form id="index-config-form" class="config-grid">
+              {% for source in index_sources %}
+                <section class="config-card" data-source-name="{{ source.name }}">
+                  <h3>{{ source.label }}</h3>
+                  {% if source.fields %}
+                    {% for field in source.fields %}
+                      <label class="field">
+                        <span>{{ field.label }}</span>
+                        <input
+                          type="{{ field.type }}"
+                          name="{{ source.name }}.{{ field.key }}"
+                          value="{{ source.config.get(field.key, field.default) }}"
+                          {% if field.type == "number" %}min="1" step="1"{% endif %}
+                        >
+                      </label>
+                    {% endfor %}
+                  {% else %}
+                    <p class="muted">No custom settings.</p>
+                  {% endif %}
+                </section>
+              {% endfor %}
+              <div class="config-actions">
+                <button type="submit" class="primary-button">Save index settings</button>
+              </div>
+            </form>
+          </section>
+          <section class="config-shell history-shell">
+            <div class="panel-heading">
+              <span class="panel-icon" aria-hidden="true">⟲</span>
+              <div>
+                <h2>Indexing history</h2>
+                <p class="muted">Last five runs, with outcome and item counts.</p>
+              </div>
+              <div class="status-note" id="history-status" aria-live="polite"></div>
+            </div>
+            <details class="history-details" open>
+              <summary><span>Recent runs</span><span class="filter-summary">Expand table</span></summary>
+              <div class="history-panel">
+                <div class="history-table-wrap">
+                  <table class="history-table" aria-label="Recent index runs">
+                    <thead>
+                      <tr>
+                        <th>Run</th>
+                        <th>Status</th>
+                        <th>Items</th>
+                        <th>Time</th>
+                      </tr>
+                    </thead>
+                    <tbody id="history-body">
+                      {% for run in indexing_history %}
+                        <tr data-history-run>
+                          <td>
+                            <div class="history-run">
+                              <strong>{{ run.scope|capitalize }}</strong>
+                              <span class="muted">{{ run.started_at }}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <span class="history-badge {{ run.status }}">{{ run.status }}</span>
+                            {% if run.error_text %}
+                              <div class="muted history-note">{{ run.error_text }}</div>
+                            {% elif run.success_summary %}
+                              <div class="muted history-note">{{ run.success_summary }}</div>
+                            {% elif run.progress_message %}
+                              <div class="muted history-note">{{ run.progress_message }}</div>
+                            {% endif %}
+                          </td>
+                          <td>{{ run.item_count or 0 }}</td>
+                          <td>{{ run.finished_at or "Running" }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
+            <div class="config-actions history-actions">
+              <button type="button" class="primary-button" id="reindex-button">Trigger index</button>
+              <div class="index-status-stack">
+                <span class="pill subtle reindex-status" id="reindex-status" aria-live="polite">Checking indexing status...</span>
+                <div class="progress-shell" id="index-progress-shell" aria-live="polite">
+                  <div class="progress-track" role="progressbar" aria-label="Index progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div class="progress-fill" id="index-progress-fill"></div>
+                  </div>
+                  <div class="progress-meta">
+                    <span class="progress-label" id="index-progress-label">Waiting for progress</span>
+                    <span class="progress-percent" id="index-progress-percent">0%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </aside>
+        <section class="results-shell">
+          <div class="results-header">
+            <div>
+              <p class="eyebrow results-eyebrow">Admin note</p>
+              <h2>Controls moved off the public page</h2>
+              <p class="muted">Use this page for index maintenance only.</p>
+            </div>
+          </div>
+          <section class="empty-state" role="status">
+            <h2>No search tools here.</h2>
+            <p>The public auction browser stays on the home page.</p>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <div
+      id="app-state"
+      data-api-url="{{ url_for('api_search') }}"
+      data-query=""
+      data-sort="ending_soonest"
+      data-limit="50"
+      data-offset="0"
+      data-total="0"
+      data-indexing="{{ 'true' if metadata.indexing else 'false' }}"
+      data-current-run-started-at="{{ metadata.current_run_started_at or '' }}"
+      data-current-run-scope="{{ metadata.current_run_scope or '' }}"
+      data-indexed-at="{{ metadata.indexed_at or '' }}"
+      data-deploy-commit="{{ deploy_commit or '' }}"
+      data-last-run-status="{{ metadata.last_run_status or '' }}"
+      data-last-run-finished-at="{{ metadata.last_run_finished_at or '' }}"
+      data-last-run-summary="{{ metadata.last_run_summary or '' }}"
+      data-last-run-duration-seconds="{{ metadata.last_run_duration_seconds or 0 }}"
+      data-progress-total="{{ metadata.progress_total or 0 }}"
+      data-progress-done="{{ metadata.progress_done or 0 }}"
+      data-progress-percent="{{ metadata.progress_percent or 0 }}"
+      data-progress-message="{{ metadata.progress_message or '' }}"
+      data-indexing-history='{{ indexing_history | tojson }}'
+    ></div>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

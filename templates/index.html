@@ -50,107 +50,18 @@
 
       <div class="content-grid">
         <aside class="sidebar-shell">
-          <section class="config-shell">
+          <nav class="config-shell">
             <div class="panel-heading">
-              <span class="panel-icon" aria-hidden="true">⌁</span>
+              <span class="panel-icon" aria-hidden="true">☰</span>
               <div>
-                <h2>Index controls</h2>
-                <p class="muted">Change what gets scraped, then save and reindex.</p>
-              </div>
-              <div class="status-note" id="config-status" aria-live="polite"></div>
-            </div>
-            <form id="index-config-form" class="config-grid">
-              {% for source in index_sources %}
-                <section class="config-card" data-source-name="{{ source.name }}">
-                  <h3>{{ source.label }}</h3>
-                  {% if source.fields %}
-                    {% for field in source.fields %}
-                      <label class="field">
-                        <span>{{ field.label }}</span>
-                        <input
-                          type="{{ field.type }}"
-                          name="{{ source.name }}.{{ field.key }}"
-                          value="{{ source.config.get(field.key, field.default) }}"
-                          {% if field.type == "number" %}min="1" step="1"{% endif %}
-                        >
-                      </label>
-                    {% endfor %}
-                  {% else %}
-                    <p class="muted">No custom settings.</p>
-                  {% endif %}
-                </section>
-              {% endfor %}
-              <div class="config-actions">
-                <button type="submit" class="primary-button">Save index settings</button>
-              </div>
-            </form>
-          </section>
-          <section class="config-shell history-shell">
-            <div class="panel-heading">
-              <span class="panel-icon" aria-hidden="true">⟲</span>
-              <div>
-                <h2>Indexing history</h2>
-                <p class="muted">Last five runs, with outcome and item counts.</p>
-              </div>
-              <div class="status-note" id="history-status" aria-live="polite"></div>
-            </div>
-            <details class="history-details" open>
-              <summary><span>Recent runs</span><span class="filter-summary">Expand table</span></summary>
-              <div class="history-panel">
-                <div class="history-table-wrap">
-                  <table class="history-table" aria-label="Recent index runs">
-                    <thead>
-                      <tr>
-                        <th>Run</th>
-                        <th>Status</th>
-                        <th>Items</th>
-                        <th>Time</th>
-                      </tr>
-                    </thead>
-                    <tbody id="history-body">
-                      {% for run in indexing_history %}
-                        <tr data-history-run>
-                          <td>
-                            <div class="history-run">
-                              <strong>{{ run.scope|capitalize }}</strong>
-                              <span class="muted">{{ run.started_at }}</span>
-                            </div>
-                          </td>
-                          <td>
-                            <span class="history-badge {{ run.status }}">{{ run.status }}</span>
-                            {% if run.error_text %}
-                              <div class="muted history-note">{{ run.error_text }}</div>
-                            {% elif run.success_summary %}
-                              <div class="muted history-note">{{ run.success_summary }}</div>
-                            {% elif run.progress_message %}
-                              <div class="muted history-note">{{ run.progress_message }}</div>
-                            {% endif %}
-                          </td>
-                          <td>{{ run.item_count or 0 }}</td>
-                          <td>{{ run.finished_at or "Running" }}</td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </details>
-            <div class="config-actions history-actions">
-              <button type="button" class="primary-button" id="reindex-button">Trigger index</button>
-              <div class="index-status-stack">
-                <span class="pill subtle reindex-status" id="reindex-status" aria-live="polite">Checking indexing status...</span>
-                <div class="progress-shell" id="index-progress-shell" aria-live="polite">
-                  <div class="progress-track" role="progressbar" aria-label="Index progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                    <div class="progress-fill" id="index-progress-fill"></div>
-                  </div>
-                  <div class="progress-meta">
-                    <span class="progress-label" id="index-progress-label">Waiting for progress</span>
-                    <span class="progress-percent" id="index-progress-percent">0%</span>
-                  </div>
-                </div>
+                <h2>Sidebar</h2>
+                <p class="muted">Primary search stays here. Admin tools live on a separate page.</p>
               </div>
             </div>
-          </section>
+            <div class="sidebar-nav">
+              <a class="link-button sidebar-link" href="/admin">Open admin panel</a>
+            </div>
+          </nav>
         </aside>
 
         <section class="results-shell">
