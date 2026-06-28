@@ -391,11 +391,13 @@ function updatePagination(query, sort, total, offset, count) {
   const hasPagination = total > limit;
   paginationShell.hidden = !hasPagination;
   if (!hasPagination) {
+    paginationNote.textContent = "";
     return;
   }
 
-  const previousOffset = Math.max(0, offset - limit);
-  const nextOffset = offset + limit;
+  const effectiveOffset = total > 0 && offset >= total ? 0 : offset;
+  const previousOffset = Math.max(0, effectiveOffset - limit);
+  const nextOffset = effectiveOffset + limit;
   const buildUrl = (pageOffset) => {
     const url = new URL(window.location.href);
     if (query) url.searchParams.set("q", query);
@@ -409,19 +411,23 @@ function updatePagination(query, sort, total, offset, count) {
     initialState.sources.forEach((source) => url.searchParams.append("source", source));
     if (initialState.endingWithin) url.searchParams.set("ending_within", String(initialState.endingWithin));
     else url.searchParams.delete("ending_within");
+    if (initialState.homePostalCode) url.searchParams.set("home_postal_code", initialState.homePostalCode);
+    else url.searchParams.delete("home_postal_code");
+    if (initialState.radiusKm) url.searchParams.set("radius_km", initialState.radiusKm);
+    else url.searchParams.delete("radius_km");
     return url.pathname + "?" + url.searchParams.toString();
   };
 
   paginationPrevious.href = buildUrl(previousOffset);
-  paginationPrevious.classList.toggle("disabled", offset <= 0);
-  paginationPrevious.setAttribute("aria-disabled", offset <= 0 ? "true" : "false");
+  paginationPrevious.classList.toggle("disabled", effectiveOffset <= 0);
+  paginationPrevious.setAttribute("aria-disabled", effectiveOffset <= 0 ? "true" : "false");
 
   paginationNext.href = buildUrl(nextOffset);
   paginationNext.classList.toggle("disabled", nextOffset >= total);
   paginationNext.setAttribute("aria-disabled", nextOffset >= total ? "true" : "false");
 
-  const start = total === 0 ? 0 : offset + 1;
-  const end = Math.min(offset + count, total);
+  const start = total === 0 ? 0 : effectiveOffset + 1;
+  const end = Math.min(effectiveOffset + count, total);
   paginationNote.textContent = `Showing ${start}-${end} of ${total}`;
 }
 
@@ -472,9 +478,13 @@ async function runSearch(query, sort, offset = 0) {
       throw new Error(`Search failed (${response.status})`);
     }
     const payload = await response.json();
+    const payloadOffset = payload.offset ?? offset;
     renderResults(payload.results || [], payload.query || query);
     updateSummary(payload.query || query, payload.total ?? payload.count ?? 0);
-    updatePagination(payload.query || query, payload.sort || sort, payload.total ?? 0, payload.offset ?? offset, payload.count ?? 0);
+    if (payloadOffset !== offset) {
+      syncUrl(payload.query || query, payload.sort || sort, payloadOffset);
+    }
+    updatePagination(payload.query || query, payload.sort || sort, payload.total ?? 0, payloadOffset, payload.count ?? 0);
     resultStatus.textContent = payload.last_run_summary || "";
   } catch (error) {
     resultsList.innerHTML = emptyState("Search unavailable.", error instanceof Error ? error.message : "Unable to load search results.");
