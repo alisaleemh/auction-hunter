@@ -4,6 +4,8 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+git config --global --add safe.directory "$repo_root" || true
+
 mkdir -p /srv/auction-hunter/data
 
 if [[ ! -f .env ]]; then
