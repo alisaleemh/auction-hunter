@@ -20,6 +20,7 @@ const paginationShell = document.getElementById("pagination-shell");
 const paginationPrevious = document.getElementById("pagination-previous");
 const paginationNext = document.getElementById("pagination-next");
 const paginationNote = document.getElementById("pagination-note");
+const reindexButtons = Array.from(document.querySelectorAll("[data-reindex-trigger]"));
 const reindexButton = document.getElementById("reindex-button");
 const reindexStatus = document.getElementById("reindex-status");
 const progressShell = document.getElementById("index-progress-shell");
@@ -221,12 +222,14 @@ function updateIndexStatus() {
 }
 
 function updateReindexStatus(payload) {
-  if (!reindexStatus || !reindexButton) return;
+  if (!reindexStatus || !reindexButtons.length) return;
   const indexing = payload?.indexing ?? initialState.indexing;
   const scope = payload?.current_run_scope || initialState.currentRunScope;
   if (indexing) {
     reindexStatus.textContent = `Reindexing${scope ? ` (${scope})` : ""}...`;
-    reindexButton.disabled = true;
+    reindexButtons.forEach((button) => {
+      button.disabled = true;
+    });
     return;
   }
   const finishedAt = payload?.last_run_finished_at || initialState.lastRunFinishedAt;
@@ -234,7 +237,9 @@ function updateReindexStatus(payload) {
   reindexStatus.textContent = finishedAt
     ? `Last reindex: ${finishedAt}${duration ? ` (${duration.toFixed(1)}s)` : ""}`
     : "Ready to reindex";
-  reindexButton.disabled = false;
+  reindexButtons.forEach((button) => {
+    button.disabled = false;
+  });
 }
 
 function historyBadgeClass(status) {
@@ -481,8 +486,10 @@ async function runSearch(query, sort, offset = 0) {
 }
 
 async function triggerReindex() {
-  if (!reindexButton) return;
-  reindexButton.disabled = true;
+  if (!reindexButtons.length) return;
+  reindexButtons.forEach((button) => {
+    button.disabled = true;
+  });
   if (reindexStatus) reindexStatus.textContent = "Starting reindex...";
   try {
     const response = await fetch("/api/reindex", { method: "POST" });
@@ -515,7 +522,9 @@ async function triggerReindex() {
     }
   } catch (error) {
     if (reindexStatus) reindexStatus.textContent = error instanceof Error ? error.message : "Reindex failed";
-    reindexButton.disabled = false;
+    reindexButtons.forEach((button) => {
+      button.disabled = false;
+    });
   }
 }
 
@@ -586,9 +595,9 @@ function initialize() {
     renderHistory(initialState.indexingHistory);
   }
 
-  reindexButton?.addEventListener("click", () => {
+  reindexButtons.forEach((button) => button.addEventListener("click", () => {
     void triggerReindex();
-  });
+  }));
 
   window.setInterval(updateTimeLeft, TIMELEFT_UPDATE_MS);
 }

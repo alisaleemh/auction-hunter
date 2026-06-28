@@ -11,18 +11,53 @@
       <header class="topbar">
         <a class="brand" href="/" aria-label="Auction Hunter home"><span class="brand-mark" aria-hidden="true">A</span><span>Auction Hunter</span></a>
         <div class="topbar-actions">
-          <span class="desktop-only">Admin only.</span>
+          <a class="link-button topbar-link" href="/">Back to search</a>
           <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch color theme" aria-pressed="false"><span aria-hidden="true">◐</span><span class="theme-toggle-label">Theme</span></button>
         </div>
       </header>
 
-      <section class="hero">
-        <div class="hero-content">
+      <section class="admin-header">
+        <div>
+          <nav class="breadcrumb" aria-label="Breadcrumb">
+            <a href="/">Auction Hunter</a>
+            <span aria-hidden="true">/</span>
+            <span>Admin</span>
+          </nav>
           <p class="eyebrow">Admin</p>
-          <h1>Index controls<br><span>and run history.</span></h1>
-          <p class="hero-copy">Save source settings, trigger a reindex, and inspect the last five runs here.</p>
+          <h1>Indexing dashboard</h1>
+          <p class="hero-copy">Manage source settings, trigger indexing, and review recent runs.</p>
         </div>
-        <div class="status-stack">
+        <div class="admin-header-actions">
+          <a class="link-button" href="/">Back to search</a>
+          <button type="button" class="primary-button" id="reindex-button" data-reindex-trigger>Trigger index</button>
+        </div>
+      </section>
+
+      <div class="admin-layout">
+        <aside class="sidebar-shell admin-sidebar">
+          <nav class="config-shell admin-nav" aria-label="Admin navigation">
+            <div class="panel-heading">
+              <span class="panel-icon" aria-hidden="true">☰</span>
+              <div>
+                <h2>Admin</h2>
+                <p class="muted">Indexing tools and run state.</p>
+              </div>
+            </div>
+            <div class="sidebar-nav">
+              <a class="link-button sidebar-link" href="/">Search lots</a>
+              <a class="link-button sidebar-link active" href="/admin" aria-current="page">Indexing admin</a>
+            </div>
+          </nav>
+
+          <section class="config-shell admin-status-card">
+            <div class="panel-heading">
+              <span class="panel-icon" aria-hidden="true">●</span>
+              <div>
+                <h2>Current status</h2>
+                <p class="muted">{{ "Indexing is running" if metadata.indexing else "Ready for indexing" }}</p>
+              </div>
+            </div>
+            <div class="status-stack admin-status-stack">
           {% if deploy_commit %}
             <span class="pill subtle" title="Commit deployed in the current container">
               Deployed commit {{ deploy_commit }}
@@ -40,11 +75,37 @@
           <span class="pill" id="index-status" data-indexed-at="{{ metadata.indexed_at or '' }}">
             Last indexed: {{ metadata.indexed_at or "Not indexed yet" }}
           </span>
-        </div>
-      </section>
+            </div>
+          </section>
+        </aside>
 
-      <div class="content-grid">
-        <aside class="sidebar-shell">
+        <section class="admin-main">
+          <section class="config-shell admin-progress-card">
+            <div class="panel-heading">
+              <span class="panel-icon" aria-hidden="true">↻</span>
+              <div>
+                <h2>Index progress</h2>
+                <p class="muted">Live run progress and trigger controls.</p>
+              </div>
+              <div class="status-note" id="history-status" aria-live="polite"></div>
+            </div>
+            <div class="admin-progress-grid">
+              <div class="index-status-stack">
+                <span class="pill subtle reindex-status" id="reindex-status" aria-live="polite">Checking indexing status...</span>
+                <div class="progress-shell" id="index-progress-shell" aria-live="polite">
+                  <div class="progress-track" role="progressbar" aria-label="Index progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div class="progress-fill" id="index-progress-fill"></div>
+                  </div>
+                  <div class="progress-meta">
+                    <span class="progress-label" id="index-progress-label">Waiting for progress</span>
+                    <span class="progress-percent" id="index-progress-percent">0%</span>
+                  </div>
+                </div>
+              </div>
+              <button type="button" class="primary-button admin-secondary-trigger" data-reindex-trigger>Trigger index</button>
+            </div>
+          </section>
+
           <section class="config-shell">
             <div class="panel-heading">
               <span class="panel-icon" aria-hidden="true">⌁</span>
@@ -80,6 +141,7 @@
               </div>
             </form>
           </section>
+
           <section class="config-shell history-shell">
             <div class="panel-heading">
               <span class="panel-icon" aria-hidden="true">⟲</span>
@@ -87,7 +149,6 @@
                 <h2>Indexing history</h2>
                 <p class="muted">Last five runs, with outcome and item counts.</p>
               </div>
-              <div class="status-note" id="history-status" aria-live="polite"></div>
             </div>
             <details class="history-details" open>
               <summary><span>Recent runs</span><span class="filter-summary">Expand table</span></summary>
@@ -130,34 +191,6 @@
                 </div>
               </div>
             </details>
-            <div class="config-actions history-actions">
-              <button type="button" class="primary-button" id="reindex-button">Trigger index</button>
-              <div class="index-status-stack">
-                <span class="pill subtle reindex-status" id="reindex-status" aria-live="polite">Checking indexing status...</span>
-                <div class="progress-shell" id="index-progress-shell" aria-live="polite">
-                  <div class="progress-track" role="progressbar" aria-label="Index progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                    <div class="progress-fill" id="index-progress-fill"></div>
-                  </div>
-                  <div class="progress-meta">
-                    <span class="progress-label" id="index-progress-label">Waiting for progress</span>
-                    <span class="progress-percent" id="index-progress-percent">0%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </aside>
-        <section class="results-shell">
-          <div class="results-header">
-            <div>
-              <p class="eyebrow results-eyebrow">Admin note</p>
-              <h2>Controls moved off the public page</h2>
-              <p class="muted">Use this page for index maintenance only.</p>
-            </div>
-          </div>
-          <section class="empty-state" role="status">
-            <h2>No search tools here.</h2>
-            <p>The public auction browser stays on the home page.</p>
           </section>
         </section>
       </div>
