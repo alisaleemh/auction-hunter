@@ -169,10 +169,11 @@ def test_get_root_empty_query(tmp_path, monkeypatch):
     response = client.get("/")
     assert response.status_code == 200
     assert b"All indexed lots" in response.data
-    assert b"Trigger index" in response.data
+    assert b"Open admin panel" in response.data
+    assert b"Trigger index" not in response.data
     assert b"theme-toggle" in response.data
     assert b"Search lots, brands, or categories" in response.data
-    assert b"Indexing history" in response.data
+    assert b"Open admin panel" in response.data
 
 
 def test_get_root_renders_indexed_results(tmp_path, monkeypatch):

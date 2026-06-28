@@ -533,51 +533,58 @@ function initialize() {
     window.localStorage.setItem("auction-hunter-theme", nextTheme);
     setTheme(nextTheme);
   });
-  queryInput.value = initialState.query;
-  sortSelect.value = initialState.sort || "ending_soonest";
-  endingWithinSelect.value = initialState.endingWithin || "";
-  if (homePostalCodeInput) homePostalCodeInput.value = initialState.homePostalCode || "";
-  if (radiusKmInput) radiusKmInput.value = initialState.radiusKm || "";
-  sourceInputs.forEach((input) => {
-    input.checked = initialState.sources.includes(input.value);
-  });
-  updateIndexStatus();
-  updateTimeLeft();
-  updateReindexStatus();
-  updateProgress();
-  renderHistory(initialState.indexingHistory);
-  renderResults(initialState.results || [], initialState.query);
-  updateSummary(initialState.query, initialState.total || initialState.results.length || 0);
-  updatePagination(initialState.query, initialState.sort || "ending_soonest", initialState.total || 0, initialState.offset || 0, initialState.results.length || 0);
+  const hasSearchUi = Boolean(queryInput && sortSelect && resultsList);
+  if (hasSearchUi) {
+    queryInput.value = initialState.query;
+    sortSelect.value = initialState.sort || "ending_soonest";
+    endingWithinSelect.value = initialState.endingWithin || "";
+    if (homePostalCodeInput) homePostalCodeInput.value = initialState.homePostalCode || "";
+    if (radiusKmInput) radiusKmInput.value = initialState.radiusKm || "";
+    sourceInputs.forEach((input) => {
+      input.checked = initialState.sources.includes(input.value);
+    });
+    updateIndexStatus();
+    updateTimeLeft();
+    updateReindexStatus();
+    updateProgress();
+    renderHistory(initialState.indexingHistory);
+    renderResults(initialState.results || [], initialState.query);
+    updateSummary(initialState.query, initialState.total || initialState.results.length || 0);
+    updatePagination(initialState.query, initialState.sort || "ending_soonest", initialState.total || 0, initialState.offset || 0, initialState.results.length || 0);
 
-  form?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    collectFilterState();
-    void runSearch(queryInput.value.trim(), sortSelect.value, 0);
-  });
-
-  sortSelect?.addEventListener("change", () => {
-    void runSearch(queryInput.value.trim(), sortSelect.value, 0);
-  });
-
-  endingWithinSelect?.addEventListener("change", () => {
-    initialState.endingWithin = endingWithinSelect.value;
-    void runSearch(queryInput.value.trim(), sortSelect.value, 0);
-  });
-
-  sourceInputs.forEach((input) => {
-    input.addEventListener("change", () => {
-      initialState.sources = sourceInputs.filter((node) => node.checked).map((node) => node.value);
+    form?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      collectFilterState();
       void runSearch(queryInput.value.trim(), sortSelect.value, 0);
     });
-  });
 
-  clearButton?.addEventListener("click", () => {
-    queryInput.value = "";
-    queryInput.focus();
-    collectFilterState();
-    void runSearch("", sortSelect.value, 0);
-  });
+    sortSelect?.addEventListener("change", () => {
+      void runSearch(queryInput.value.trim(), sortSelect.value, 0);
+    });
+
+    endingWithinSelect?.addEventListener("change", () => {
+      initialState.endingWithin = endingWithinSelect.value;
+      void runSearch(queryInput.value.trim(), sortSelect.value, 0);
+    });
+
+    sourceInputs.forEach((input) => {
+      input.addEventListener("change", () => {
+        initialState.sources = sourceInputs.filter((node) => node.checked).map((node) => node.value);
+        void runSearch(queryInput.value.trim(), sortSelect.value, 0);
+      });
+    });
+
+    clearButton?.addEventListener("click", () => {
+      queryInput.value = "";
+      queryInput.focus();
+      collectFilterState();
+      void runSearch("", sortSelect.value, 0);
+    });
+  } else {
+    updateReindexStatus();
+    updateProgress();
+    renderHistory(initialState.indexingHistory);
+  }
 
   reindexButton?.addEventListener("click", () => {
     void triggerReindex();
