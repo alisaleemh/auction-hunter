@@ -176,6 +176,20 @@ def test_get_root_empty_query(tmp_path, monkeypatch):
     assert b"Open admin panel" in response.data
 
 
+def test_admin_page_has_clear_return_navigation(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert b"Indexing dashboard" in response.data
+    assert b"Back to search" in response.data
+    assert b'href="/"'.lower() in response.data.lower()
+    assert b"Trigger index" in response.data
+
+
 def test_get_root_renders_indexed_results(tmp_path, monkeypatch):
     test_store = AuctionStore(tmp_path / "index.sqlite3")
     _seed_store(test_store)
