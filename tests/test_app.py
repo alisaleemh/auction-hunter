@@ -162,6 +162,69 @@ def _seed_store_with_many_lots(store: AuctionStore, *, count: int = 5):
     )
 
 
+def _seed_store_with_mixed_search_lots(store: AuctionStore, *, browse_count: int = 70, stroller_count: int = 15):
+    now = datetime.now(timezone.utc)
+    started_at = now.isoformat()
+    store.upsert_source_status("HiBid", "success", started_at, started_at, None)
+    run_id = store.start_index_run("manual", started_at)
+    lots = [
+        make_lot_record(
+            source="HiBid",
+            provider_auction_id="a1",
+            provider_lot_id=f"tool-{i}",
+            title=f"Workshop Lot {i}",
+            description="Assorted hand tools",
+            current_bid=i,
+            end_time=(now + timedelta(days=2, minutes=i)).isoformat(),
+            url=f"https://example.com/tools/{i}",
+        )
+        for i in range(1, browse_count + 1)
+    ]
+    lots.extend(
+        make_lot_record(
+            source="HiBid",
+            provider_auction_id="a1",
+            provider_lot_id=f"stroller-{i}",
+            title=f"Travel Stroller {i}",
+            description="Compact baby stroller",
+            current_bid=i,
+            end_time=(now + timedelta(days=3, minutes=i)).isoformat(),
+            url=f"https://example.com/stroller/{i}",
+        )
+        for i in range(1, stroller_count + 1)
+    )
+    store.upsert_snapshot(
+        "HiBid",
+        run_id,
+        started_at,
+        [
+            {
+                "provider_auction_id": "a1",
+                "title": "Mixed Auction",
+                "url": "https://example.com/auction",
+                "address": "20 Automatic Rd, Brampton, ON",
+                "city": "Brampton",
+                "state": "ON",
+                "postal_code": "L6S 5N6",
+                "country": "Canada",
+                "latitude": None,
+                "longitude": None,
+                "distance_miles": 3.2,
+                "raw_payload": {"id": "a1"},
+            }
+        ],
+        lots,
+    )
+    store.prune_source_rows("HiBid", run_id, (now + timedelta(days=7)).isoformat())
+    store.finish_index_run(
+        run_id,
+        (now + timedelta(minutes=5)).isoformat(),
+        {"HiBid": {"status": "success", "auctions": 1, "lots": len(lots)}},
+        "1/1 sources indexed",
+        None,
+    )
+
+
 def test_get_root_empty_query(tmp_path, monkeypatch):
     test_store = AuctionStore(tmp_path / "index.sqlite3")
     monkeypatch.setattr(auction_app, "store", test_store)
@@ -216,6 +279,23 @@ def test_get_root_renders_pagination_for_browse_and_search(tmp_path, monkeypatch
     assert b"Showing 1-2 of 5" in search_response.data
 
 
+def test_search_pagination_clamps_stale_offset_without_breaking_browse(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    _seed_store_with_mixed_search_lots(test_store)
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+
+    browse_response = client.get("/?limit=50&offset=50")
+    assert browse_response.status_code == 200
+    assert b"Showing 51-85 of 85" in browse_response.data
+
+    search_response = client.get("/?q=stroller&limit=50&offset=50")
+    assert search_response.status_code == 200
+    assert b'15 of 15 matches for "stroller"' in search_response.data
+    assert b"Showing 51-100 of 85" not in search_response.data
+    assert b"Showing 51-100 of 8710" not in search_response.data
+
+
 def test_api_search_returns_indexed_shape(tmp_path, monkeypatch):
     test_store = AuctionStore(tmp_path / "index.sqlite3")
     _seed_store(test_store)
@@ -260,6 +340,45 @@ def test_api_search_returns_filtered_pagination_totals(tmp_path, monkeypatch):
     assert payload["count"] == 2
     assert payload["total"] == 5
     assert payload["offset"] == 2
+
+
+def test_api_search_clamps_stale_offset_without_breaking_browse(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    _seed_store_with_mixed_search_lots(test_store)
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+
+    browse_payload = client.get("/api/search?limit=50&offset=50").get_json()
+    assert browse_payload["count"] == 35
+    assert browse_payload["total"] == 85
+    assert browse_payload["offset"] == 50
+
+    search_payload = client.get("/api/search?q=stroller&limit=50&offset=50").get_json()
+    assert search_payload["count"] == 15
+    assert search_payload["total"] == 15
+    assert search_payload["offset"] == 0
+
+
+def test_api_search_returns_cursor_pages_in_stable_order(tmp_path, monkeypatch):
+    test_store = AuctionStore(tmp_path / "index.sqlite3")
+    _seed_store_with_mixed_search_lots(test_store, browse_count=0, stroller_count=5)
+    monkeypatch.setattr(auction_app, "store", test_store)
+    client = auction_app.app.test_client()
+
+    first_payload = client.get("/api/search?q=stroller&sort=ending_soonest&limit=2").get_json()
+    assert first_payload["count"] == 2
+    assert first_payload["total"] == 5
+    assert first_payload["offset"] == 0
+    assert first_payload["next_cursor"]
+
+    second_payload = client.get(f"/api/search?q=stroller&sort=ending_soonest&limit=2&cursor={first_payload['next_cursor']}").get_json()
+    assert second_payload["count"] == 2
+    assert second_payload["total"] == 5
+    assert second_payload["offset"] == 0
+    assert second_payload["next_cursor"]
+    assert {row["productUrl"] for row in first_payload["results"]}.isdisjoint(
+        {row["productUrl"] for row in second_payload["results"]}
+    )
 
 
 def test_api_status_reports_indexing_state(tmp_path, monkeypatch):

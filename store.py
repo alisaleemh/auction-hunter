@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -11,7 +12,7 @@ from typing import Iterable
 from urllib.parse import urljoin
 
 from geocode import normalize_postal_code, postal_code_record, distance_between_postal_codes_km
-from search import TERM_EXPANSIONS, expanded_query_tokens, filter_and_sort_results, normalize_text, query_tokens
+from search import TERM_EXPANSIONS, expanded_query_tokens, filter_and_sort_results, match_rank, normalize_text, query_tokens
 
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "auction_index.sqlite3"
@@ -705,7 +706,9 @@ class AuctionStore:
         radius_km: float | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> tuple[list[dict], int]:
+        cursor: str | None = None,
+        include_pagination: bool = False,
+    ) -> tuple[list[dict], int] | tuple[list[dict], int, str | None, int]:
         current = now or utc_now()
         now_iso = to_iso(current)
         max_hours = 24 * 7 if ending_within_hours is None else max(1, int(ending_within_hours))
@@ -723,10 +726,9 @@ class AuctionStore:
                 candidate_ids = self._fts_candidate_ids(match_query, source_filters, window_end, now_iso)
             except Exception:
                 candidate_ids = None
-        if candidate_ids is not None and not candidate_ids:
-            candidate_ids = None
         sql = """
             SELECT
+                l.id AS lot_id,
                 s.name AS source,
                 a.title AS auction_title,
                 a.address AS auction_address,
@@ -758,7 +760,7 @@ class AuctionStore:
             params.extend(source_filters)
         if candidate_ids is not None:
             if not candidate_ids:
-                return [], 0
+                return ([], 0, None, 0) if include_pagination else ([], 0)
             sql += " AND l.id IN (" + ", ".join("?" for _ in candidate_ids) + ")"
             params.extend(candidate_ids)
         else:
@@ -780,6 +782,7 @@ class AuctionStore:
                     distance_km = haversine_miles((origin_lat, origin_lon), (row["auction_latitude"], row["auction_longitude"])) * 1.609344
             results.append(
                 {
+                    "lot_id": row["lot_id"],
                     "source": row["source"],
                     "auction_title": row["auction_title"],
                     "sourceAuction": row["auction_title"],
@@ -811,29 +814,52 @@ class AuctionStore:
         if origin_coords and radius_km is not None:
             filtered = [result for result in filtered if result.get("distance_km") is not None and result["distance_km"] <= radius_km]
         total = len(filtered)
+        filtered.sort(key=lambda result: self._stable_result_sort_key(result, sort_by, query))
+        cursor_key = self._decode_result_cursor(cursor)
+        effective_offset = 0 if cursor_key is not None else offset
+        if cursor_key is not None:
+            filtered = [result for result in filtered if self._stable_result_sort_key(result, sort_by, query) > cursor_key]
+        page = filtered[effective_offset : effective_offset + limit + 1]
+        has_next = len(page) > limit
+        page = page[:limit]
+        next_cursor = self._encode_result_cursor(self._stable_result_sort_key(page[-1], sort_by, query)) if has_next and page else None
+        if include_pagination:
+            return page, total, next_cursor, effective_offset
+        return page, total
+
+    def _stable_result_sort_key(self, result: dict, sort_by: str, query: str) -> list:
+        current_bid = result.get("current_bid")
+        has_price = isinstance(current_bid, (int, float))
+        price = float(current_bid) if has_price else 0.0
+        end_time_key = parse_iso(result.get("end_time"))
+        end_sort = end_time_key.isoformat() if end_time_key is not None else "9999-12-31T23:59:59+00:00"
+        title = normalize_text(result.get("lot_title"))
+        source = normalize_text(result.get("source"))
+        lot_id = int(result.get("lot_id") or 0)
         if sort_by == "relevance":
-            return filtered[offset : offset + limit], total
+            rank = match_rank(result, normalize_text(query), query_tokens(query))
+            return [rank[0], float(rank[1]), end_sort, source, title, lot_id]
+        if sort_by == "price_low_high":
+            return [0 if has_price else 1, price, end_sort, title, lot_id]
+        if sort_by == "price_high_low":
+            return [0 if has_price else 1, -price, end_sort, title, lot_id]
+        if sort_by == "proximity":
+            dist = result.get("distance_km")
+            return [0 if dist is not None else 1, float(dist) if dist is not None else 1_000_000_000.0, end_sort, title, lot_id]
+        return [end_sort, title, lot_id]
 
-        def sort_key(result: dict) -> tuple:
-            current_bid = result.get("current_bid")
-            has_price = isinstance(current_bid, (int, float))
-            price = float(current_bid) if has_price else 0.0
-            end_time_key = parse_iso(result.get("end_time"))
-            end_sort = end_time_key if end_time_key is not None else datetime.max.replace(tzinfo=timezone.utc)
-            title = result.get("lot_title") or ""
-            if sort_by == "ending_soonest":
-                return (end_sort, title.lower())
-            if sort_by == "price_low_high":
-                return (0 if has_price else 1, price, end_sort, title.lower())
-            if sort_by == "price_high_low":
-                return (0 if has_price else 1, -price, end_sort, title.lower())
-            if sort_by == "proximity":
-                dist = result.get("distance_km")
-                return (0 if dist is not None else 1, dist if dist is not None else float("inf"), end_sort, title.lower())
-            return (end_sort, title.lower())
+    def _encode_result_cursor(self, key: list) -> str:
+        return urlsafe_b64encode(json.dumps(key, separators=(",", ":")).encode("utf-8")).decode("ascii")
 
-        filtered.sort(key=sort_key)
-        return filtered[offset : offset + limit], total
+    def _decode_result_cursor(self, cursor: str | None) -> list | None:
+        if not cursor:
+            return None
+        try:
+            raw = urlsafe_b64decode(cursor.encode("ascii"))
+            decoded = json.loads(raw.decode("utf-8"))
+        except Exception:
+            return None
+        return decoded if isinstance(decoded, list) else None
 
     def _build_fts_match_query(self, query: str) -> str:
         parts = []
@@ -853,7 +879,8 @@ class AuctionStore:
                 parts.append("(" + " OR ".join(group_parts) + ")")
         phrase = normalize_text(query).replace('"', " ")
         if len(normalized) > 1 and phrase:
-            parts.insert(0, f'"{phrase}"')
+            token_match = " AND ".join(parts)
+            return f'("{phrase}" OR ({token_match}))'
         return " AND ".join(parts)
 
     def _fts_candidate_ids(self, match_query: str, source_filters: list[str], window_end: str, now_iso: str) -> list[int]:

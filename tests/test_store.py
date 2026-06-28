@@ -179,6 +179,95 @@ def test_query_results_filters_by_source_and_ending_window(tmp_path):
     assert results[0]["source"] == "HiBid"
 
 
+def test_query_results_offset_uses_stable_sorted_filtered_results(tmp_path):
+    store = AuctionStore(tmp_path / "index.sqlite3")
+    now = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    started_at = to_iso(now)
+    store.upsert_source_status("HiBid", "success", started_at, started_at, None)
+    run_id = store.start_index_run("manual", started_at)
+    store.upsert_snapshot(
+        "HiBid",
+        run_id,
+        started_at,
+        [_auction("a1")],
+        [
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="a1",
+                provider_lot_id=f"l{i}",
+                title="Same Gate",
+                description="Stable offset pagination",
+                end_time=to_iso(now + timedelta(days=1)),
+                url=f"https://example.com/lot/{i}",
+            )
+            for i in range(1, 6)
+        ],
+    )
+    store.prune_source_rows("HiBid", run_id, to_iso(now + timedelta(days=7)))
+
+    first_page, first_total = store.query_results("gate", now=now, sort_by="ending_soonest", limit=2, offset=0)
+    second_page, second_total = store.query_results("gate", now=now, sort_by="ending_soonest", limit=2, offset=2)
+
+    assert first_total == 5
+    assert second_total == 5
+    assert [row["productUrl"] for row in first_page] == ["https://example.com/lot/1", "https://example.com/lot/2"]
+    assert [row["productUrl"] for row in second_page] == ["https://example.com/lot/3", "https://example.com/lot/4"]
+    assert {row["productUrl"] for row in first_page}.isdisjoint({row["productUrl"] for row in second_page})
+
+
+def test_query_results_cursor_uses_same_stable_sorted_order(tmp_path):
+    store = AuctionStore(tmp_path / "index.sqlite3")
+    now = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    started_at = to_iso(now)
+    store.upsert_source_status("HiBid", "success", started_at, started_at, None)
+    run_id = store.start_index_run("manual", started_at)
+    store.upsert_snapshot(
+        "HiBid",
+        run_id,
+        started_at,
+        [_auction("a1")],
+        [
+            make_lot_record(
+                source="HiBid",
+                provider_auction_id="a1",
+                provider_lot_id=f"l{i}",
+                title="Same Gate",
+                description="Stable cursor pagination",
+                end_time=to_iso(now + timedelta(days=1)),
+                url=f"https://example.com/lot/{i}",
+            )
+            for i in range(1, 6)
+        ],
+    )
+    store.prune_source_rows("HiBid", run_id, to_iso(now + timedelta(days=7)))
+
+    first_page, first_total, cursor, first_offset = store.query_results(
+        "gate",
+        now=now,
+        sort_by="ending_soonest",
+        limit=2,
+        include_pagination=True,
+    )
+    second_page, second_total, next_cursor, second_offset = store.query_results(
+        "gate",
+        now=now,
+        sort_by="ending_soonest",
+        limit=2,
+        cursor=cursor,
+        include_pagination=True,
+    )
+
+    assert first_total == 5
+    assert second_total == 5
+    assert first_offset == 0
+    assert second_offset == 0
+    assert cursor
+    assert next_cursor
+    assert [row["productUrl"] for row in first_page] == ["https://example.com/lot/1", "https://example.com/lot/2"]
+    assert [row["productUrl"] for row in second_page] == ["https://example.com/lot/3", "https://example.com/lot/4"]
+    assert {row["productUrl"] for row in first_page}.isdisjoint({row["productUrl"] for row in second_page})
+
+
 def test_fts_search_handles_title_synonyms_and_prefixes(tmp_path):
     store = AuctionStore(tmp_path / "index.sqlite3")
     now = datetime(2026, 4, 18, tzinfo=timezone.utc)

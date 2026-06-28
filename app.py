@@ -115,6 +115,11 @@ def _parse_offset(value: str | None, default: int = 0) -> int:
         return default
 
 
+def _parse_cursor(value: str | None) -> str | None:
+    value = (value or "").strip()
+    return value or None
+
+
 def _parse_sources(values: list[str] | None) -> list[str]:
     if not values:
         return []
@@ -178,12 +183,13 @@ def run_search(
     sort_by: str = "relevance",
     limit: int = 50,
     offset: int = 0,
+    cursor: str | None = None,
     sources: list[str] | None = None,
     ending_within_hours: int | None = None,
     home_postal_code: str | None = None,
     radius_km: float | None = None,
-) -> tuple[list[dict], int, list[str]]:
-    results, total = store.query_results(
+) -> tuple[list[dict], int, list[str], int, str | None]:
+    results, total, next_cursor, effective_offset = store.query_results(
         query,
         sort_by=sort_by,
         sources=sources,
@@ -192,8 +198,23 @@ def run_search(
         radius_km=radius_km,
         limit=limit,
         offset=offset,
+        cursor=cursor,
+        include_pagination=True,
     )
-    return results, total, []
+    if cursor is None and offset > 0 and total > 0 and offset >= total:
+        effective_offset = 0
+        results, total, next_cursor, effective_offset = store.query_results(
+            query,
+            sort_by=sort_by,
+            sources=sources,
+            ending_within_hours=ending_within_hours,
+            home_postal_code=home_postal_code,
+            radius_km=radius_km,
+            limit=limit,
+            offset=effective_offset,
+            include_pagination=True,
+        )
+    return results, total, [], effective_offset, next_cursor
 
 
 @app.get("/")
@@ -202,15 +223,17 @@ def index():
     sort_by = request.args.get("sort", "ending_soonest").strip() or "ending_soonest"
     limit = _parse_limit(request.args.get("limit"), 50)
     offset = _parse_offset(request.args.get("offset"), 0)
+    cursor = _parse_cursor(request.args.get("cursor"))
     selected_sources = _parse_sources(request.args.getlist("source"))
     ending_within_hours = _parse_ending_within(request.args.get("ending_within"))
     home_postal_code = request.args.get("home_postal_code", "").strip() or None
     radius_km = _parse_radius_km(request.args.get("radius_km"))
-    results, total, errors = run_search(
+    results, total, errors, offset, next_cursor = run_search(
         query,
         sort_by=sort_by,
         limit=limit,
         offset=offset,
+        cursor=cursor,
         sources=selected_sources,
         ending_within_hours=ending_within_hours,
         home_postal_code=home_postal_code,
@@ -233,6 +256,7 @@ def index():
         build_search_url=_build_search_url,
         results=results,
         total=total,
+        next_cursor=next_cursor,
         errors=errors,
         metadata=metadata,
         deploy_commit=deploy_commit,
@@ -259,15 +283,17 @@ def api_search():
     sort_by = request.args.get("sort", "relevance").strip() or "relevance"
     limit = _parse_limit(request.args.get("limit"), 50)
     offset = _parse_offset(request.args.get("offset"), 0)
+    cursor = _parse_cursor(request.args.get("cursor"))
     selected_sources = _parse_sources(request.args.getlist("source"))
     ending_within_hours = _parse_ending_within(request.args.get("ending_within"))
     home_postal_code = request.args.get("home_postal_code", "").strip() or None
     radius_km = _parse_radius_km(request.args.get("radius_km"))
-    results, total, errors = run_search(
+    results, total, errors, offset, next_cursor = run_search(
         query,
         sort_by=sort_by,
         limit=limit,
         offset=offset,
+        cursor=cursor,
         sources=selected_sources,
         ending_within_hours=ending_within_hours,
         home_postal_code=home_postal_code,
@@ -280,6 +306,7 @@ def api_search():
             "count": len(results),
             "total": total,
             "offset": offset,
+            "next_cursor": next_cursor,
             "results": results,
             "errors": errors,
             "sort": sort_by,
