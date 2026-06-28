@@ -1,33 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
-
-git config --global --add safe.directory "$repo_root" || true
+repo_root="$(pwd -P)"
+repo_url="${AUCTION_HUNTER_REPO_URL:-https://github.com/alisaleemh/auction-hunter.git}"
 
 mkdir -p /srv/auction-hunter/data
-
-if [[ ! -f .env ]]; then
-  echo "missing required local file: .env" >&2
-  exit 1
-fi
-
-git fetch origin main
-
-deploy_commit="$(git rev-parse --short origin/main)"
-export DEPLOY_COMMIT="$deploy_commit"
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-git archive --format=tar origin/main | tar -xf - -C "$tmpdir"
+git clone --depth 1 --branch main "$repo_url" "$tmpdir/repo"
+
+deploy_commit="$(git -C "$tmpdir/repo" rev-parse --short HEAD)"
+export DEPLOY_COMMIT="$deploy_commit"
+
 rsync -a --delete \
+  --exclude='.git' \
   --exclude='.env' \
   --exclude='data/auction_index.sqlite3' \
   --exclude='data/geonames_ca_postal_codes.tsv' \
-  "$tmpdir"/ "$repo_root"/
-mv -f "$tmpdir/data/geonames_ca_postal_codes.tsv" "$repo_root/data/geonames_ca_postal_codes.tsv"
+  "$tmpdir/repo"/ "$repo_root"/
+mv -f "$tmpdir/repo/data/geonames_ca_postal_codes.tsv" "$repo_root/data/geonames_ca_postal_codes.tsv"
 
 docker compose config
 docker compose pull

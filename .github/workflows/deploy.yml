@@ -53,5 +53,6 @@ jobs:
       - name: Deploy
         if: steps.gate.outputs.deploy == 'true'
         run: |
+          git config --global --add safe.directory "$APP_DIR"
           cd "$APP_DIR"
           ./deploy.sh
