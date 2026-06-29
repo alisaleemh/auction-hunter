@@ -26,3 +26,23 @@ services:
       INDEX_INTERVAL: ${AUCTION_INDEX_INTERVAL:-21600}
     volumes:
       - /srv/auction-hunter/data:/app/data
+
+  shadow-indexer:
+    build: .
+    restart: unless-stopped
+    command:
+      [
+        "sh",
+        "-c",
+        "python -u shadow_indexer.py serve --port 5002 & while true; do echo \"[$$(date -Iseconds)] shadow index start\"; python -u shadow_indexer.py run --scope scheduled; echo \"[$$(date -Iseconds)] shadow index sleep $${SHADOW_INDEX_INTERVAL:-21600}s\"; sleep \"$${SHADOW_INDEX_INTERVAL:-21600}\"; done",
+      ]
+    environment:
+      DEPLOY_COMMIT: ${DEPLOY_COMMIT:-}
+      SHADOW_INDEX_INTERVAL: ${AUCTION_SHADOW_INDEX_INTERVAL:-21600}
+      SHADOW_INDEX_GLOBAL_WORKERS: ${SHADOW_INDEX_GLOBAL_WORKERS:-32}
+      SHADOW_INDEX_PROVIDER_WORKERS: ${SHADOW_INDEX_PROVIDER_WORKERS:-8}
+      SHADOW_INDEX_MAX_ATTEMPTS: ${SHADOW_INDEX_MAX_ATTEMPTS:-3}
+    ports:
+      - "5002:5002"
+    volumes:
+      - /srv/auction-hunter/data:/app/data
