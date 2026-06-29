@@ -25,6 +25,7 @@ PAGE_LENGTH = 100
 REQUEST_TIMEOUT = 15
 REQUEST_RETRIES = 2
 REQUEST_BACKOFF_SECONDS = 1.0
+LOT_PARSE_RETRIES = 2
 MAX_PAGE_WORKERS = 8
 DEFAULT_SEARCH_PARTITIONS = [
     "baby",
@@ -240,21 +241,81 @@ def _fetch_page(page_number: int, zip_code: str, miles: int, search_text: str | 
     return page_number, _fetch_text(client, _page_url(page_number, zip_code, miles, search_text))
 
 
+def _append_lot_record(lot: dict, apollo_state: dict, lot_links: dict[str, str], lots: list[dict], auctions: dict[str, dict], seen_lots: set[str]) -> bool:
+    provider_lot_id = str(lot.get("id"))
+    if not provider_lot_id or provider_lot_id in seen_lots:
+        return False
+    lot_record, auction = _lot_record(lot, apollo_state, lot_links)
+    auctions[auction["provider_auction_id"]] = auction
+    seen_lots.add(provider_lot_id)
+    if lot_record:
+        lots.append(lot_record)
+        return True
+    return False
+
+
+def _detail_lot_record(provider_lot_id: str, lot_url: str) -> tuple[dict | None, dict]:
+    html = _fetch_text(_session(), lot_url)
+    apollo_state = _parse_state(html)
+    lot = apollo_state.get(f"Lot:{provider_lot_id}")
+    if not lot:
+        raise ValueError(f"HiBid detail page missing Lot:{provider_lot_id}")
+    return _lot_record(lot, apollo_state, {provider_lot_id: lot_url.split("?", 1)[0]})
+
+
+def _retry_failed_lot(
+    provider_lot_id: str,
+    lot: dict,
+    apollo_state: dict,
+    lot_links: dict[str, str],
+    lots: list[dict],
+    auctions: dict[str, dict],
+    seen_lots: set[str],
+    first_error: Exception,
+) -> bool:
+    for attempt in range(LOT_PARSE_RETRIES):
+        try:
+            if _append_lot_record(lot, apollo_state, lot_links, lots, auctions, seen_lots):
+                logger.info("hibid lot retry succeeded lot_id=%s attempt=%s", provider_lot_id, attempt + 1)
+                return True
+        except Exception as exc:
+            first_error = exc
+
+    lot_url = lot_links.get(provider_lot_id)
+    if lot_url:
+        try:
+            lot_record, auction = _detail_lot_record(provider_lot_id, lot_url)
+            auctions[auction["provider_auction_id"]] = auction
+            seen_lots.add(provider_lot_id)
+            if lot_record:
+                lots.append(lot_record)
+                logger.info("hibid lot detail retry succeeded lot_id=%s", provider_lot_id)
+                return True
+        except Exception as exc:
+            first_error = exc
+
+    logger.warning("hibid lot skipped after retries lot_id=%s error=%s", provider_lot_id, first_error)
+    return False
+
+
 def _collect_page_snapshot(html: str, lots: list[dict], auctions: dict[str, dict], seen_lots: set[str]) -> tuple[int, int]:
     apollo_state = _parse_state(html)
     lot_links = _extract_lot_links(html)
     lot_refs, current_page, page_length, filtered_count = _root_search_refs(apollo_state)
+    failed_lots: list[tuple[str, dict, Exception]] = []
     for ref in lot_refs:
         lot_ref = ref["__ref"]
         lot = apollo_state.get(lot_ref, {})
         provider_lot_id = str(lot.get("id"))
         if not provider_lot_id or provider_lot_id in seen_lots:
             continue
-        seen_lots.add(provider_lot_id)
-        lot_record, auction = _lot_record(lot, apollo_state, lot_links)
-        auctions[auction["provider_auction_id"]] = auction
-        if lot_record:
-            lots.append(lot_record)
+        try:
+            _append_lot_record(lot, apollo_state, lot_links, lots, auctions, seen_lots)
+        except Exception as exc:
+            failed_lots.append((provider_lot_id, lot, exc))
+    for provider_lot_id, lot, exc in failed_lots:
+        if provider_lot_id not in seen_lots:
+            _retry_failed_lot(provider_lot_id, lot, apollo_state, lot_links, lots, auctions, seen_lots, exc)
     total_pages = max(1, math.ceil(filtered_count / max(page_length, 1))) if filtered_count else current_page
     return current_page, total_pages
 
