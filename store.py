@@ -16,6 +16,7 @@ from search import TERM_EXPANSIONS, expanded_query_tokens, filter_and_sort_resul
 
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "auction_index.sqlite3"
+INDEX_HEARTBEAT_STALE_SECONDS = 120
 
 
 SCHEMA = """
@@ -401,15 +402,17 @@ class AuctionStore:
             )
 
     def get_index_run_history(self, limit: int = 5) -> list[dict]:
+        stale_cutoff = utc_now() - timedelta(seconds=INDEX_HEARTBEAT_STALE_SECONDS)
         with self.connect() as conn:
             latest_running_row = conn.execute(
                 """
                 SELECT id
                 FROM index_runs
-                WHERE finished_at IS NULL AND (error_text IS NULL OR error_text = '')
+                WHERE finished_at IS NULL AND (error_text IS NULL OR error_text = '') AND heartbeat_at >= ?
                 ORDER BY id DESC
                 LIMIT 1
-                """
+                """,
+                (to_iso(stale_cutoff),),
             ).fetchone()
             latest_running_id = int(latest_running_row["id"]) if latest_running_row else None
             rows = conn.execute(
@@ -928,6 +931,7 @@ class AuctionStore:
         return dict(row)
 
     def get_metadata(self) -> SearchMetadata:
+        stale_cutoff = utc_now() - timedelta(seconds=INDEX_HEARTBEAT_STALE_SECONDS)
         with self.connect() as conn:
             last_success = conn.execute(
                 """
@@ -960,7 +964,8 @@ class AuctionStore:
         if source_stats:
             indexed_auction_count = sum(int(stats.get("auctions", 0) or 0) for stats in source_stats.values())
             indexed_lot_count = sum(int(stats.get("lots", 0) or 0) for stats in source_stats.values())
-        indexing = bool(last_run and last_run["finished_at"] is None and last_run["heartbeat_at"])
+        heartbeat_at = parse_iso(last_run["heartbeat_at"]) if last_run and last_run["heartbeat_at"] else None
+        indexing = bool(last_run and last_run["finished_at"] is None and heartbeat_at and heartbeat_at >= stale_cutoff)
         stale = bool(last_run and last_run["finished_at"] is None and not indexing)
         source_progress = {}
         if last_run and last_run["source_progress_json"]:

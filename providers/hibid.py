@@ -1,25 +1,44 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
+import time
 from datetime import datetime, timezone
-from urllib.parse import parse_qs, urljoin
+from urllib.parse import parse_qs, urlencode, urljoin
 from zoneinfo import ZoneInfo
 
 import requests
+from requests import RequestException
 from bs4 import BeautifulSoup
 
 from geocode import distance_from_l9t8n6_miles
 from models import ProviderEstimate, ProviderSnapshot, make_lot_record
 
 
+logger = logging.getLogger(__name__)
 BASE_URL = "https://hibid.com"
 DEFAULT_ZIP = "L9T 8N6"
 DEFAULT_MILES = 25
 PAGE_LENGTH = 100
 REQUEST_TIMEOUT = 15
+REQUEST_RETRIES = 2
+REQUEST_BACKOFF_SECONDS = 1.0
 MAX_PAGE_WORKERS = 8
+DEFAULT_SEARCH_PARTITIONS = [
+    "baby",
+    "car seat",
+    "stroller",
+    "gate",
+    "seagate",
+    "hard drive",
+    "ssd",
+    "laptop",
+    "monitor",
+    "dji",
+    "drone",
+]
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -35,9 +54,20 @@ def _session() -> requests.Session:
 
 
 def _fetch_text(session: requests.Session, url: str) -> str:
-    response = session.get(url, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    return response.text
+    last_error: Exception | None = None
+    for attempt in range(REQUEST_RETRIES + 1):
+        try:
+            response = session.get(url, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            return response.text
+        except RequestException as exc:
+            last_error = exc
+            if attempt >= REQUEST_RETRIES:
+                break
+            time.sleep(REQUEST_BACKOFF_SECONDS * (attempt + 1))
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"failed to fetch {url}")
 
 
 def _extract_og_image_url(html: str) -> str | None:
@@ -92,17 +122,21 @@ def _condition_from_description(description: str) -> str | None:
 
 
 def _address_from_fr8star_url(url: str | None) -> str:
+    parts = _address_parts_from_fr8star_url(url)
+    return ", ".join(part for part in [parts["address"], parts["city"], parts["state"], parts["postal_code"], parts["country"]] if part)
+
+
+def _address_parts_from_fr8star_url(url: str | None) -> dict[str, str]:
     if not url or "?" not in url:
-        return ""
+        return {"address": "", "city": "", "state": "", "postal_code": "", "country": ""}
     params = parse_qs(url.split("?", 1)[1])
-    parts = [
-        params.get("origin_address_line_1", [""])[0],
-        params.get("origin_address_city", [""])[0],
-        params.get("origin_address_state", [""])[0],
-        params.get("origin_address_postal_code", [""])[0],
-        params.get("origin_address_country", [""])[0],
-    ]
-    return ", ".join(part.replace("+", " ").strip() for part in parts if part.strip())
+    return {
+        "address": params.get("origin_address_line_1", [""])[0].replace("+", " ").strip(),
+        "city": params.get("origin_address_city", [""])[0].replace("+", " ").strip(),
+        "state": params.get("origin_address_state", [""])[0].replace("+", " ").strip(),
+        "postal_code": params.get("origin_address_postal_code", [""])[0].replace("+", " ").strip(),
+        "country": params.get("origin_address_country", [""])[0].replace("+", " ").strip(),
+    }
 
 
 def _parse_hibid_end_time(lot_state: dict) -> str | None:
@@ -129,18 +163,18 @@ def datetime_from_us(value: str) -> str:
 def _auction_record(auction_ref: str | None, apollo_state: dict, lot: dict) -> dict:
     auction = apollo_state.get(auction_ref, {}) if auction_ref else {}
     address = _address_from_fr8star_url(lot.get("fr8StarUrl"))
-    parts = [part.strip() for part in address.split(",")] if address else []
-    city = parts[1] if len(parts) > 1 else None
-    state = parts[2] if len(parts) > 2 else None
-    postal_code = parts[3] if len(parts) > 3 else None
-    country = parts[4] if len(parts) > 4 else None
+    address_parts = _address_parts_from_fr8star_url(lot.get("fr8StarUrl"))
+    city = address_parts["city"] or None
+    state = address_parts["state"] or None
+    postal_code = address_parts["postal_code"] or None
+    country = address_parts["country"] or None
     distance = lot.get("distanceMiles")
     if distance is None and address:
         distance = distance_from_l9t8n6_miles(address)
     return {
         "provider_auction_id": str((auction_ref or "unknown").split(":")[-1]),
-        "title": auction.get("title") or auction.get("name") or "",
-        "url": urljoin(BASE_URL, auction.get("urlPath") or "/lots"),
+        "title": auction.get("title") or auction.get("name") or auction.get("eventName") or "",
+        "url": urljoin(BASE_URL, auction.get("urlPath") or f"/catalog/{(auction_ref or 'unknown').split(':')[-1]}"),
         "address": address,
         "city": city,
         "state": state,
@@ -161,12 +195,12 @@ def _lot_record(lot: dict, apollo_state: dict, lot_links: dict[str, str]) -> tup
     if end_time is None:
         return None, auction
     lot_url = lot_links.get(str(lot.get("id")), urljoin(BASE_URL, f"/lot/{lot.get('id')}"))
-    client = _session()
     image_url = None
-    try:
-        image_url = _extract_og_image_url(_fetch_text(client, lot_url))
-    except Exception:
-        image_url = None
+    featured_picture = lot.get("featuredPicture") or {}
+    for key in ("hdThumbnailLocation", "thumbnailLocation", "fullSizeLocation"):
+        if featured_picture.get(key):
+            image_url = featured_picture[key]
+            break
     lot_payload = dict(lot)
     if image_url:
         lot_payload["imageUrl"] = image_url
@@ -189,18 +223,21 @@ def _lot_record(lot: dict, apollo_state: dict, lot_links: dict[str, str]) -> tup
     return lot_record, auction
 
 
-def _lots_url(zip_code: str, miles: int) -> str:
-    return f"{BASE_URL}/lots?zip={requests.utils.quote(zip_code)}&miles={miles}"
+def _lots_url(zip_code: str, miles: int, search_text: str | None = None) -> str:
+    params = {"zip": zip_code, "miles": miles}
+    if search_text:
+        params["q"] = search_text
+    return f"{BASE_URL}/lots?{urlencode(params)}"
 
 
-def _page_url(page_number: int, zip_code: str, miles: int) -> str:
-    lots_url = _lots_url(zip_code, miles)
+def _page_url(page_number: int, zip_code: str, miles: int, search_text: str | None = None) -> str:
+    lots_url = _lots_url(zip_code, miles, search_text)
     return lots_url if page_number <= 1 else f"{lots_url}&apage={page_number}"
 
 
-def _fetch_page(page_number: int, zip_code: str, miles: int) -> tuple[int, str]:
+def _fetch_page(page_number: int, zip_code: str, miles: int, search_text: str | None = None) -> tuple[int, str]:
     client = _session()
-    return page_number, _fetch_text(client, _page_url(page_number, zip_code, miles))
+    return page_number, _fetch_text(client, _page_url(page_number, zip_code, miles, search_text))
 
 
 def _collect_page_snapshot(html: str, lots: list[dict], auctions: dict[str, dict], seen_lots: set[str]) -> tuple[int, int]:
@@ -222,25 +259,48 @@ def _collect_page_snapshot(html: str, lots: list[dict], auctions: dict[str, dict
     return current_page, total_pages
 
 
-def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
-    config = config or {}
-    zip_code = str(config.get("zip_code") or DEFAULT_ZIP)
-    miles = int(config.get("miles") or DEFAULT_MILES)
+def _collect_partition(zip_code: str, miles: int, search_text: str | None, lots: list[dict], auctions: dict[str, dict], seen_lots: set[str]) -> None:
     client = _session()
-    first_page_html = _fetch_text(client, _lots_url(zip_code, miles))
-    lots: list[dict] = []
-    auctions: dict[str, dict] = {}
-    seen_lots: set[str] = set()
+    first_page_html = _fetch_text(client, _lots_url(zip_code, miles, search_text))
     _, total_pages = _collect_page_snapshot(first_page_html, lots, auctions, seen_lots)
     if total_pages > 1:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         page_numbers = list(range(2, total_pages + 1))
         with ThreadPoolExecutor(max_workers=min(MAX_PAGE_WORKERS, len(page_numbers))) as executor:
-            futures = [executor.submit(_fetch_page, page_number, zip_code, miles) for page_number in page_numbers]
+            futures = [executor.submit(_fetch_page, page_number, zip_code, miles, search_text) for page_number in page_numbers]
             for future in as_completed(futures):
-                _, html = future.result()
-                _collect_page_snapshot(html, lots, auctions, seen_lots)
+                try:
+                    _, html = future.result()
+                    _collect_page_snapshot(html, lots, auctions, seen_lots)
+                except Exception as exc:
+                    logger.warning("hibid page fetch skipped search=%r error=%s", search_text, exc)
+
+
+def _search_partitions(config: dict) -> list[str]:
+    raw_terms = config.get("search_partitions")
+    if isinstance(raw_terms, str):
+        terms = [term.strip() for term in raw_terms.split(",")]
+    elif isinstance(raw_terms, list):
+        terms = [str(term).strip() for term in raw_terms]
+    else:
+        terms = DEFAULT_SEARCH_PARTITIONS
+    return [term for term in terms if term]
+
+
+def fetch_snapshot(config: dict | None = None) -> ProviderSnapshot:
+    config = config or {}
+    zip_code = str(config.get("zip_code") or DEFAULT_ZIP)
+    miles = int(config.get("miles") or DEFAULT_MILES)
+    lots: list[dict] = []
+    auctions: dict[str, dict] = {}
+    seen_lots: set[str] = set()
+    _collect_partition(zip_code, miles, None, lots, auctions, seen_lots)
+    for term in _search_partitions(config):
+        try:
+            _collect_partition(zip_code, miles, term, lots, auctions, seen_lots)
+        except Exception as exc:
+            logger.warning("hibid search partition skipped term=%r error=%s", term, exc)
     return ProviderSnapshot(source="HiBid", auctions=list(auctions.values()), lots=lots)
 
 

@@ -11,7 +11,9 @@ from providers.auction403 import (
 )
 from providers.hibid import (
     _address_from_fr8star_url,
+    _address_parts_from_fr8star_url,
     _extract_lot_links,
+    fetch_snapshot as fetch_hibid_snapshot,
     _lot_record,
     _parse_state,
     _root_search_refs,
@@ -79,6 +81,102 @@ def test_hibid_address_from_fr8star_url():
         "&origin_address_postal_code=L6S+5N6&origin_address_country=Canada"
     )
     assert _address_from_fr8star_url(url) == "20 Automatic Rd, Brampton, ON, L6S 5N6, Canada"
+    assert _address_parts_from_fr8star_url(url) == {
+        "address": "20 Automatic Rd",
+        "city": "Brampton",
+        "state": "ON",
+        "postal_code": "L6S 5N6",
+        "country": "Canada",
+    }
+
+
+def test_hibid_lot_record_parses_fr8star_fields_with_unit_commas():
+    lot = {
+        "id": 309573172,
+        "auction": {"__ref": "Auction:755272"},
+        "lead": "Seagate BarraCuda 8TB Internal Hard Drive HDD",
+        "lotNumber": "46",
+        "description": "Seagate BarraCuda 8TB Internal Hard Drive HDD",
+        "fr8StarUrl": (
+            "https://example.com/?origin_address_line_1=3495+Laird+Road%2c+Unit+10"
+            "&origin_address_city=Mississauga&origin_address_state=ON"
+            "&origin_address_postal_code=L5L+5S5&origin_address_country=Canada"
+        ),
+        "featuredPicture": {"thumbnailLocation": "https://example.com/drive.jpg"},
+        "shippingOffered": True,
+        "lotState": {"highBid": 1.5, "timeLeftTitle": "Internet Bidding closes at: 7/3/2026 6:01:10 PM EST", "status": "OPEN"},
+    }
+    state = {"Auction:755272": {"eventName": "New, Returned, and Overstocked Items"}}
+
+    result, auction = _lot_record(lot, state, {"309573172": "https://hibid.com/lot/309573172/seagate"})
+
+    assert result["provider_lot_id"] == "309573172"
+    assert result["raw_payload"]["imageUrl"] == "https://example.com/drive.jpg"
+    assert auction["title"] == "New, Returned, and Overstocked Items"
+    assert auction["city"] == "Mississauga"
+    assert auction["state"] == "ON"
+    assert auction["postal_code"] == "L5L 5S5"
+    assert auction["country"] == "Canada"
+
+
+def test_hibid_fetch_snapshot_uses_search_partitions_and_dedupes(monkeypatch):
+    def page(lot_ids: list[int], filtered_count: int | None = None) -> str:
+        lots = []
+        refs = []
+        for lot_id in lot_ids:
+            lots.append(
+                f'''"Lot:{lot_id}": {{
+                  "__typename": "Lot",
+                  "id": {lot_id},
+                  "auction": {{"__ref": "Auction:1"}},
+                  "lead": "Lot {lot_id}",
+                  "description": "Description {lot_id}",
+                  "lotNumber": "{lot_id}",
+                  "shippingOffered": true,
+                  "lotState": {{"status": "OPEN", "highBid": 1, "timeLeftTitle": "Internet Bidding closes at: 7/3/2026 6:00:00 PM EST"}}
+                }}'''
+            )
+            refs.append(f'{{"__ref": "Lot:{lot_id}"}}')
+        return f"""
+        <html><body>
+          {' '.join(f'<a href="/lot/{lot_id}/lot-{lot_id}">Lot</a>' for lot_id in lot_ids)}
+          <script id="hibid-state" type="application/json">
+          {{
+            "apollo.state": {{
+              "Auction:1": {{"__typename": "Auction", "eventName": "Auction"}},
+              {",".join(lots)},
+              "ROOT_QUERY": {{
+                "lotSearch({{\\"input\\":{{\\"status\\":\\"OPEN\\"}},\\"pageLength\\":100,\\"pageNumber\\":1}})": {{
+                  "pagedResults": {{
+                    "pageLength": 100,
+                    "pageNumber": 1,
+                    "filteredCount": {filtered_count if filtered_count is not None else len(lot_ids)},
+                    "results": [{",".join(refs)}]
+                  }}
+                }}
+              }}
+            }}
+          }}
+          </script>
+        </body></html>
+        """
+
+    seen_urls = []
+
+    def fake_fetch_text(session, url):
+        seen_urls.append(url)
+        if "q=seagate" in url:
+            return page([309573172, 1])
+        if "q=hard+drive" in url:
+            return page([309573172])
+        return page([1])
+
+    monkeypatch.setattr("providers.hibid._fetch_text", fake_fetch_text)
+
+    snapshot = fetch_hibid_snapshot({"search_partitions": ["seagate", "hard drive"]})
+
+    assert [lot["provider_lot_id"] for lot in snapshot.lots] == ["1", "309573172"]
+    assert any("q=seagate" in url for url in seen_urls)
 
 
 def test_403_auction_address_from_html():
