@@ -6,9 +6,10 @@ import threading
 import logging
 from typing import Callable
 
-from models import ProviderEstimate, ProviderSnapshot, make_lot_record
+from models import ProviderEstimate, ProviderSnapshot
 from providers import auction403, hibid, kotn
-from store import AuctionStore, SearchMetadata, to_iso, utc_now
+from repositories import AuctionIndexRepository
+from store import to_iso, utc_now
 
 
 WINDOW_DAYS = 7
@@ -40,7 +41,7 @@ def _filter_snapshot(snapshot: ProviderSnapshot, now: datetime) -> ProviderSnaps
 
 
 def run_index(
-    store: AuctionStore,
+    store: AuctionIndexRepository,
     scope: str = "manual",
     now: datetime | None = None,
     provider_loaders: dict[str, Callable[[], ProviderSnapshot]] | None = None,
