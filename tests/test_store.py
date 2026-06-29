@@ -438,6 +438,24 @@ def test_metadata_reflects_last_run(tmp_path):
     assert metadata.last_run_duration_seconds == 600.0
 
 
+def test_metadata_marks_old_unfinished_run_stale(tmp_path):
+    store = AuctionStore(tmp_path / "index.sqlite3")
+    run_id = store.start_index_run("manual", "2026-04-18T00:00:00+00:00")
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE index_runs SET heartbeat_at = ? WHERE id = ?",
+            ("2026-04-18T00:00:00+00:00", run_id),
+        )
+
+    metadata = store.get_metadata()
+    history = store.get_index_run_history()
+
+    assert metadata.indexing is False
+    assert metadata.index_stale is True
+    assert metadata.last_run_status == "stalled"
+    assert history[0]["status"] == "stalled"
+
+
 def test_format_time_left():
     now = datetime(2026, 4, 18, 12, 0, tzinfo=timezone.utc)
     assert format_time_left("2026-04-18T14:30:00+00:00", now) == "2h 30m"

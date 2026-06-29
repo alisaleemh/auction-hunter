@@ -5,6 +5,7 @@ import time
 import app as auction_app
 from models import make_lot_record
 from store import AuctionStore
+from store import to_iso, utc_now
 
 
 def _seed_store(store: AuctionStore):
@@ -438,7 +439,8 @@ def test_api_reindex_starts_and_reports_running(tmp_path, monkeypatch):
     release = threading.Event()
 
     def fake_run_index(store, scope="manual", now=None, provider_loaders=None):
-        run_id = store.start_index_run(scope, "2026-04-18T00:00:00+00:00")
+        started_at = to_iso(utc_now())
+        run_id = store.start_index_run(scope, started_at)
         started.set()
         release.wait(timeout=5)
         store.finish_index_run(
