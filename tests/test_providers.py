@@ -12,6 +12,7 @@ from providers.auction403 import (
 from providers.hibid import (
     _address_from_fr8star_url,
     _address_parts_from_fr8star_url,
+    _collect_page_snapshot,
     _extract_lot_links,
     fetch_snapshot as fetch_hibid_snapshot,
     _lot_record,
@@ -28,6 +29,49 @@ from providers.kotn import (
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def _hibid_page_with_lots(lot_ids: list[int], *, include_links: bool = True) -> str:
+    lots = []
+    refs = []
+    for lot_id in lot_ids:
+        lots.append(
+            f'''"Lot:{lot_id}": {{
+              "__typename": "Lot",
+              "id": {lot_id},
+              "auction": {{"__ref": "Auction:1"}},
+              "lead": "Lot {lot_id}",
+              "description": "Description {lot_id}",
+              "lotNumber": "{lot_id}",
+              "shippingOffered": true,
+              "lotState": {{"status": "OPEN", "highBid": 1, "timeLeftTitle": "Internet Bidding closes at: 7/3/2026 6:00:00 PM EST"}}
+            }}'''
+        )
+        refs.append(f'{{"__ref": "Lot:{lot_id}"}}')
+    links = " ".join(f'<a href="/lot/{lot_id}/lot-{lot_id}">Lot</a>' for lot_id in lot_ids) if include_links else ""
+    return f"""
+    <html><body>
+      {links}
+      <script id="hibid-state" type="application/json">
+      {{
+        "apollo.state": {{
+          "Auction:1": {{"__typename": "Auction", "eventName": "Auction"}},
+          {",".join(lots)},
+          "ROOT_QUERY": {{
+            "lotSearch({{\\"input\\":{{\\"status\\":\\"OPEN\\"}},\\"pageLength\\":100,\\"pageNumber\\":1}})": {{
+              "pagedResults": {{
+                "pageLength": 100,
+                "pageNumber": 1,
+                "filteredCount": {len(lot_ids)},
+                "results": [{",".join(refs)}]
+              }}
+            }}
+          }}
+        }}
+      }}
+      </script>
+    </body></html>
+    """
 
 
 def test_hibid_fixture_parses_state_and_links():
@@ -121,45 +165,7 @@ def test_hibid_lot_record_parses_fr8star_fields_with_unit_commas():
 
 def test_hibid_fetch_snapshot_uses_search_partitions_and_dedupes(monkeypatch):
     def page(lot_ids: list[int], filtered_count: int | None = None) -> str:
-        lots = []
-        refs = []
-        for lot_id in lot_ids:
-            lots.append(
-                f'''"Lot:{lot_id}": {{
-                  "__typename": "Lot",
-                  "id": {lot_id},
-                  "auction": {{"__ref": "Auction:1"}},
-                  "lead": "Lot {lot_id}",
-                  "description": "Description {lot_id}",
-                  "lotNumber": "{lot_id}",
-                  "shippingOffered": true,
-                  "lotState": {{"status": "OPEN", "highBid": 1, "timeLeftTitle": "Internet Bidding closes at: 7/3/2026 6:00:00 PM EST"}}
-                }}'''
-            )
-            refs.append(f'{{"__ref": "Lot:{lot_id}"}}')
-        return f"""
-        <html><body>
-          {' '.join(f'<a href="/lot/{lot_id}/lot-{lot_id}">Lot</a>' for lot_id in lot_ids)}
-          <script id="hibid-state" type="application/json">
-          {{
-            "apollo.state": {{
-              "Auction:1": {{"__typename": "Auction", "eventName": "Auction"}},
-              {",".join(lots)},
-              "ROOT_QUERY": {{
-                "lotSearch({{\\"input\\":{{\\"status\\":\\"OPEN\\"}},\\"pageLength\\":100,\\"pageNumber\\":1}})": {{
-                  "pagedResults": {{
-                    "pageLength": 100,
-                    "pageNumber": 1,
-                    "filteredCount": {filtered_count if filtered_count is not None else len(lot_ids)},
-                    "results": [{",".join(refs)}]
-                  }}
-                }}
-              }}
-            }}
-          }}
-          </script>
-        </body></html>
-        """
+        return _hibid_page_with_lots(lot_ids).replace(f'"filteredCount": {len(lot_ids)}', f'"filteredCount": {filtered_count if filtered_count is not None else len(lot_ids)}')
 
     seen_urls = []
 
@@ -177,6 +183,95 @@ def test_hibid_fetch_snapshot_uses_search_partitions_and_dedupes(monkeypatch):
 
     assert [lot["provider_lot_id"] for lot in snapshot.lots] == ["1", "309573172"]
     assert any("q=seagate" in url for url in seen_urls)
+
+
+def test_hibid_collect_page_retries_failed_lot_parse(monkeypatch):
+    calls = {"count": 0}
+
+    def flaky_lot_record(lot, apollo_state, lot_links):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("temporary parse failure")
+        return _lot_record(lot, apollo_state, lot_links)
+
+    monkeypatch.setattr("providers.hibid._lot_record", flaky_lot_record)
+
+    lots: list[dict] = []
+    auctions: dict[str, dict] = {}
+    seen_lots: set[str] = set()
+    _collect_page_snapshot(_hibid_page_with_lots([309573172]), lots, auctions, seen_lots)
+
+    assert calls["count"] == 2
+    assert [lot["provider_lot_id"] for lot in lots] == ["309573172"]
+    assert seen_lots == {"309573172"}
+
+
+def test_hibid_collect_page_uses_detail_retry_after_parse_failures(monkeypatch):
+    def broken_lot_record(lot, apollo_state, lot_links):
+        raise RuntimeError("bad page state")
+
+    def detail_lot_record(provider_lot_id, lot_url):
+        return (
+            {
+                "source": "HiBid",
+                "provider_auction_id": "1",
+                "provider_lot_id": provider_lot_id,
+                "lot_number": "46",
+                "title": "Recovered Lot",
+                "condition": "",
+                "description": "",
+                "details": "",
+                "searchable_text": "recovered lot",
+                "current_bid": 1,
+                "shipping_available": True,
+                "url": lot_url,
+                "status": "open",
+                "end_time": "2026-07-03T22:00:00+00:00",
+                "raw_payload": {},
+            },
+            {
+                "provider_auction_id": "1",
+                "title": "Auction",
+                "url": "https://hibid.com/catalog/1",
+                "address": "",
+                "city": None,
+                "state": None,
+                "postal_code": None,
+                "country": None,
+                "latitude": None,
+                "longitude": None,
+                "distance_miles": None,
+                "raw_payload": {},
+            },
+        )
+
+    monkeypatch.setattr("providers.hibid._lot_record", broken_lot_record)
+    monkeypatch.setattr("providers.hibid._detail_lot_record", detail_lot_record)
+
+    lots: list[dict] = []
+    auctions: dict[str, dict] = {}
+    seen_lots: set[str] = set()
+    _collect_page_snapshot(_hibid_page_with_lots([309573172]), lots, auctions, seen_lots)
+
+    assert [lot["title"] for lot in lots] == ["Recovered Lot"]
+    assert seen_lots == {"309573172"}
+
+
+def test_hibid_collect_page_skips_lot_after_retries(monkeypatch, caplog):
+    def broken_lot_record(lot, apollo_state, lot_links):
+        raise RuntimeError("bad lot")
+
+    monkeypatch.setattr("providers.hibid._lot_record", broken_lot_record)
+
+    lots: list[dict] = []
+    auctions: dict[str, dict] = {}
+    seen_lots: set[str] = set()
+    with caplog.at_level("WARNING"):
+        _collect_page_snapshot(_hibid_page_with_lots([309573172], include_links=False), lots, auctions, seen_lots)
+
+    assert lots == []
+    assert seen_lots == set()
+    assert "hibid lot skipped after retries lot_id=309573172 error=bad lot" in caplog.text
 
 
 def test_403_auction_address_from_html():
