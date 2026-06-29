@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+import indexer as indexer_module
 from indexer import run_index
 from models import ProviderSnapshot, make_lot_record
 from store import AuctionStore, to_iso
@@ -174,3 +175,55 @@ def test_run_index_uses_repository_interface():
     assert repo.snapshots[0][4][0]["provider_lot_id"] == "l1"
     assert repo.pruned[0][0] == "HiBid"
     assert repo.finished_runs[0]["success_summary"] == "1/1 sources indexed"
+
+
+def test_run_index_caps_progress_when_estimate_is_too_low(tmp_path, monkeypatch):
+    store = AuctionStore(tmp_path / "index.sqlite3")
+    now = datetime(2026, 4, 18, tzinfo=timezone.utc)
+
+    def hibid_fetch_snapshot(config):
+        return ProviderSnapshot(
+            source="HiBid",
+            auctions=[_auction("a1")],
+            lots=[
+                make_lot_record(
+                    source="HiBid",
+                    provider_auction_id="a1",
+                    provider_lot_id=f"l{i}",
+                    title=f"Gate {i}",
+                    end_time=to_iso(now + timedelta(days=2, minutes=i)),
+                    url=f"https://example.com/lot/{i}",
+                )
+                for i in range(1, 6)
+            ],
+        )
+
+    def hibid_estimate_snapshot(config):
+        return indexer_module.ProviderEstimate(source="HiBid", auctions=None, lots=1)
+
+    def empty_fetch_snapshot(config):
+        return ProviderSnapshot(source="403 Auction", auctions=[], lots=[])
+
+    def empty_estimate_snapshot(config):
+        return indexer_module.ProviderEstimate(source="403 Auction", auctions=0, lots=0)
+
+    def kotn_fetch_snapshot(config):
+        return ProviderSnapshot(source="King of the North Auction", auctions=[], lots=[])
+
+    def kotn_estimate_snapshot(config):
+        return indexer_module.ProviderEstimate(source="King of the North Auction", auctions=0, lots=0)
+
+    monkeypatch.setattr(indexer_module.hibid, "fetch_snapshot", hibid_fetch_snapshot)
+    monkeypatch.setattr(indexer_module.hibid, "estimate_snapshot", hibid_estimate_snapshot)
+    monkeypatch.setattr(indexer_module.auction403, "fetch_snapshot", empty_fetch_snapshot)
+    monkeypatch.setattr(indexer_module.auction403, "estimate_snapshot", empty_estimate_snapshot)
+    monkeypatch.setattr(indexer_module.kotn, "fetch_snapshot", kotn_fetch_snapshot)
+    monkeypatch.setattr(indexer_module.kotn, "estimate_snapshot", kotn_estimate_snapshot)
+
+    run_index(store, now=now)
+
+    metadata = store.get_metadata()
+    assert metadata.progress_total == 5
+    assert metadata.progress_done == 5
+    assert metadata.progress_percent == 100.0
+    assert metadata.progress_message == "Indexed 5/5 items"

@@ -20,6 +20,12 @@ def _window_end(now: datetime) -> datetime:
     return now + timedelta(days=WINDOW_DAYS)
 
 
+def _source_total(estimated: int | None, indexed: int) -> int:
+    if estimated is None:
+        return indexed
+    return max(int(estimated), int(indexed))
+
+
 def _filter_snapshot(snapshot: ProviderSnapshot, now: datetime) -> ProviderSnapshot:
     end = _window_end(now)
     provider_auction_ids = set()
@@ -151,7 +157,7 @@ def run_index(
                     estimated = source_progress.get(source_name, {}).get("estimated")
                     indexed = int(stats.get("lots") or 0)
                     source_progress[source_name] = {
-                        "total": estimated if estimated is not None else indexed,
+                        "total": _source_total(estimated, indexed),
                         "estimated": estimated,
                         "done": indexed,
                         "indexed": indexed,
